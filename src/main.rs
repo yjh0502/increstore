@@ -1,11 +1,8 @@
 use std::io;
 
-fn zip_to_tar(src_filename: &str, dst_filename: &str) -> io::Result<()> {
-    let src_file = std::fs::File::open(src_filename)?;
-    let dst_file = std::fs::File::create(dst_filename)?;
-
-    let mut zip = zip::ZipArchive::new(src_file)?;
-    let mut ar = tar::Builder::new(dst_file);
+fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) -> io::Result<()> {
+    let mut zip = zip::ZipArchive::new(src)?;
+    let mut ar = tar::Builder::new(dst);
 
     for i in 0..zip.len() {
         let mut file = zip.by_index(i)?;
@@ -36,7 +33,11 @@ fn zip_to_tar(src_filename: &str, dst_filename: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn main() {
-    zip_to_tar("data/test.apk", "data/test.tar").expect("failed to convert");
-    println!("Hello, world!");
+fn main() -> io::Result<()> {
+    let mut src_file = std::fs::File::open("data/test.apk")?;
+    let mut dst_file = std::fs::File::create("data/test.tar")?;
+
+    zip_to_tar(&mut src_file, &mut dst_file)?;
+
+    Ok(())
 }
