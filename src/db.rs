@@ -39,7 +39,7 @@ create table if not exists blobs (
     Ok(())
 }
 
-pub fn insert(blob: Blob) -> Result<()> {
+pub fn insert(blob: &Blob) -> Result<()> {
     let conn = Connection::open(dbpath())?;
 
     conn.execute(

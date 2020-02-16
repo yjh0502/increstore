@@ -1,3 +1,7 @@
+#[macro_use]
+extern crate log;
+
+use async_std::task::ready;
 use std::io;
 use std::path::Path;
 
@@ -36,14 +40,14 @@ impl WriteMetadata {
     }
 }
 
-pub struct HashWrite<W> {
+pub struct HashRW<W> {
     meta: WriteMetadata,
     w: W,
 }
 
-impl<W> HashWrite<W> {
+impl<W> HashRW<W> {
     fn new(w: W) -> Self {
-        Self {
+        HashRW {
             meta: WriteMetadata::new(),
             w,
         }
@@ -54,7 +58,7 @@ impl<W> HashWrite<W> {
     }
 }
 
-impl<W: io::Write> io::Write for HashWrite<W> {
+impl<W: io::Write> io::Write for HashRW<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self.w.write(buf) {
             Ok(n) => {
@@ -75,7 +79,7 @@ use std::marker::Unpin;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-impl<W> async_std::io::Write for HashWrite<W>
+impl<W> async_std::io::Write for HashRW<W>
 where
     W: async_std::io::Write + Unpin,
 {
@@ -86,14 +90,13 @@ where
     ) -> Poll<io::Result<usize>> {
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
-        match w.poll_write(ctx, buf) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(n)) => {
+        match ready!(w.poll_write(ctx, buf)) {
+            Ok(n) => {
                 s.meta.size += n as u64;
                 s.meta.hash.update(&buf[..n]);
                 Poll::Ready(Ok(n))
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Err(e) => Poll::Ready(Err(e)),
         }
     }
 
@@ -107,6 +110,27 @@ where
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
         w.poll_close(ctx)
+    }
+}
+
+impl<W> async_std::io::Read for HashRW<W>
+where
+    W: async_std::io::Read + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        ctx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let mut s = self.as_mut();
+        let w = Pin::new(&mut s.w);
+        match ready!(w.poll_read(ctx, buf)) {
+            Ok(res) => {
+                s.meta.hash.update(&buf[..res]);
+                Poll::Ready(Ok(res))
+            }
+            Err(e) => Poll::Ready(Err(e)),
+        }
     }
 }
 
@@ -147,8 +171,7 @@ fn prefix() -> &'static str {
     "data"
 }
 
-fn filepath(digest: sha1::Digest) -> String {
-    let s = format!("{}", digest);
+fn filepath(s: &str) -> String {
     format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..])
 }
 
@@ -156,7 +179,7 @@ fn store_zip(input_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata>
     let mut input_file = std::fs::File::open(input_path)?;
     let dst_file = std::fs::File::create(&dst_path)?;
 
-    let mut dst_file = HashWrite::new(io::BufWriter::new(dst_file));
+    let mut dst_file = HashRW::new(io::BufWriter::new(dst_file));
 
     zip_to_tar(&mut input_file, &mut dst_file)?;
 
@@ -167,28 +190,31 @@ async fn store_zip_delta<R: async_std::io::Read + std::marker::Unpin>(
     src_reader: R,
     input_path: &str,
     dst_path: &str,
-) -> std::io::Result<WriteMetadata> {
-    let mut input_file = async_std::fs::File::create(input_path).await?;
+) -> std::io::Result<(WriteMetadata, WriteMetadata)> {
+    let input_file = async_std::fs::File::open(input_path).await?;
     let dst_file = async_std::fs::File::create(dst_path).await?;
 
-    let mut dst_file = HashWrite::new(dst_file);
+    let mut input_file = HashRW::new(input_file);
+    let mut dst_file = HashRW::new(dst_file);
 
     xdelta3::stream::encode_async(src_reader, &mut input_file, &mut dst_file)
         .await
         .expect("failed to encode");
 
-    Ok(dst_file.meta())
+    let input_meta = input_file.meta();
+    let dst_meta = dst_file.meta();
+
+    Ok((input_meta, dst_meta))
 }
 
-fn update_meta(tmp_path: &str, filename: &str, meta: &WriteMetadata) -> std::io::Result<()> {
-    let path = filepath(meta.digest());
+fn update_blob(tmp_path: &str, blob: &db::Blob) -> std::io::Result<()> {
+    let path = filepath(&blob.store_hash);
 
+    info!("path={}", path);
     if let Some(dir) = Path::new(&path).parent() {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::rename(tmp_path, path)?;
-
-    let blob = meta.blob(filename);
 
     db::insert(blob).expect("failed to insert blob");
     Ok(())
@@ -210,8 +236,10 @@ fn main() -> io::Result<()> {
             .unwrap();
 
         let meta = store_zip(input_filepath, &tmp_path)?;
-        println!("hash={}", meta.digest());
-        update_meta(&tmp_path, input_filename, &meta)?;
+        debug!("hash={}", meta.digest());
+
+        let blob = meta.blob(input_filename);
+        update_blob(&tmp_path, &blob)?;
     }
 
     if true {
@@ -224,15 +252,21 @@ fn main() -> io::Result<()> {
             .to_str()
             .unwrap();
 
-        let src_path = "data/objects/80/c5f3e5aac07968800b5e7410a837d6b1538f23";
+        let src_path = "data/objects/d7/1eef3b2b89a45331396e45c813b5c9b9e1cc74";
 
-        let meta = async_std::task::block_on(async {
+        let (input_meta, dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_path).await?;
             store_zip_delta(src_file, &input_filepath, &tmp_path).await
         })?;
 
-        println!("hash={}", meta.digest());
-        update_meta(&tmp_path, input_filename, &meta)?;
+        let mut blob = dst_meta.blob(input_filename);
+        blob.content_hash = format!("{}", input_meta.digest());
+
+        debug!(
+            "content_hash={}, store_hash={}",
+            blob.content_hash, blob.store_hash
+        );
+        update_blob(&tmp_path, &blob)?;
     }
 
     Ok(())
