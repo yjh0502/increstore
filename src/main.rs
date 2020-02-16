@@ -28,9 +28,10 @@ impl WriteMetadata {
             id: 0,
             filename: filename.to_owned(),
             time_created: self.time_created,
-            size: self.size,
-            content_hash: format!("{}", digest),
+            store_size: self.size,
+            content_size: self.size,
             store_hash: format!("{}", digest),
+            content_hash: format!("{}", digest),
             parent_hash: None,
         }
     }
@@ -186,7 +187,7 @@ fn store_zip(input_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata>
     Ok(dst_file.meta())
 }
 
-async fn store_zip_delta<R: async_std::io::Read + std::marker::Unpin>(
+async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     src_reader: R,
     input_path: &str,
     dst_path: &str,
@@ -225,7 +226,7 @@ fn main() -> io::Result<()> {
 
     db::prepare().expect("failed to prepare");
 
-    if false {
+    let first_blob = {
         let tmp_path = format!("{}/tmp", prefix());
 
         let input_filepath = &format!("{}/test.apk", prefix());
@@ -240,27 +241,33 @@ fn main() -> io::Result<()> {
 
         let blob = meta.blob(input_filename);
         update_blob(&tmp_path, &blob)?;
-    }
+        blob
+    };
 
     if true {
+        let tmp_unzip_path = format!("{}/tmp_unzip", prefix());
+        let input_filepath = &format!("{}/test.apk", prefix());
         let tmp_path = format!("{}/tmp", prefix());
 
-        let input_filepath = &format!("{}/test.apk", prefix());
         let input_filename = Path::new(&input_filepath)
             .file_name()
             .unwrap()
             .to_str()
             .unwrap();
 
-        let src_path = "data/objects/d7/1eef3b2b89a45331396e45c813b5c9b9e1cc74";
+        let meta = store_zip(input_filepath, &tmp_unzip_path)?;
+        let input_blob = meta.blob(input_filename);
 
-        let (input_meta, dst_meta) = async_std::task::block_on(async {
+        let src_path = filepath(&first_blob.store_hash);
+
+        let (_input_meta, dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_path).await?;
-            store_zip_delta(src_file, &input_filepath, &tmp_path).await
+            store_delta(src_file, &tmp_unzip_path, &tmp_path).await
         })?;
 
         let mut blob = dst_meta.blob(input_filename);
-        blob.content_hash = format!("{}", input_meta.digest());
+        blob.content_size = input_blob.content_size;
+        blob.content_hash = input_blob.content_hash.clone();
 
         debug!(
             "content_hash={}, store_hash={}",

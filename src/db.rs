@@ -4,7 +4,10 @@ pub struct Blob {
     pub id: u32,
     pub filename: String,
     pub time_created: time::Timespec,
-    pub size: u64,
+
+    pub store_size: u64,
+    pub content_size: u64,
+
     pub store_hash: String,
     pub content_hash: String,
     pub parent_hash: Option<String>,
@@ -24,7 +27,10 @@ create table if not exists blobs (
 
     filename        text not null,
     time_created    text not null,
-    size            integer not null, 
+
+    store_size      integer not null,
+    content_size    integer not null,
+
     store_hash      text not null unique,
     content_hash    text not null,
     parent_hash     text,
@@ -47,16 +53,18 @@ pub fn insert(blob: &Blob) -> Result<()> {
 insert into blobs (
     filename,
     time_created,
-    size,
+    store_size,
+    content_size,
     store_hash,
     content_hash,
     parent_hash
 )
-    values (?1, ?2, ?3, ?4, ?5, ?6)"#,
+    values (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
         params![
             blob.filename,
             blob.time_created,
-            blob.size as i64,
+            blob.store_size as i64,
+            blob.content_size as i64,
             blob.store_hash,
             blob.content_hash,
             blob.parent_hash
