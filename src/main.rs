@@ -23,6 +23,10 @@ impl WriteMetadata {
             parent_hash: None,
         }
     }
+
+    fn digest(&self) -> sha1::Digest {
+        self.hash.digest()
+    }
 }
 
 pub struct HashWrite<W> {
@@ -44,10 +48,6 @@ impl<W> HashWrite<W> {
 
     fn meta(&self) -> WriteMetadata {
         self.meta.clone()
-    }
-
-    fn digest(&self) -> sha1::Digest {
-        self.meta.hash.digest()
     }
 }
 
@@ -110,10 +110,35 @@ fn filepath(digest: sha1::Digest) -> String {
     format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..])
 }
 
+fn store_zip(src_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata> {
+    let mut src_file = std::fs::File::open(src_path)?;
+    let dst_file = std::fs::File::create(&dst_path)?;
+
+    let mut dst_file = HashWrite::new(io::BufWriter::new(dst_file));
+
+    zip_to_tar(&mut src_file, &mut dst_file)?;
+
+    Ok(dst_file.meta())
+}
+
+fn update_meta(tmp_path: &str, filename: &str, meta: &WriteMetadata) -> std::io::Result<()> {
+    let path = filepath(meta.digest());
+
+    if let Some(dir) = Path::new(&path).parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::rename(tmp_path, path)?;
+
+    let blob = meta.blob(filename);
+
+    db::insert(blob).expect("failed to insert blob");
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     db::prepare().expect("failed to prepare");
 
-    let tempfile = format!("{}/tmp", prefix());
+    let tmp_path = format!("{}/tmp", prefix());
 
     let src_filepath = &format!("{}/test.apk", prefix());
     let src_filename = Path::new(&src_filepath)
@@ -122,25 +147,9 @@ fn main() -> io::Result<()> {
         .to_str()
         .unwrap();
 
-    let mut src_file = std::fs::File::open(src_filepath)?;
-    let dst_file = std::fs::File::create(&tempfile)?;
-
-    let mut dst_file = HashWrite::new(io::BufWriter::new(dst_file));
-
-    zip_to_tar(&mut src_file, &mut dst_file)?;
-
-    println!("hash={}", dst_file.digest());
-
-    let path = filepath(dst_file.digest());
-
-    if let Some(dir) = Path::new(&path).parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::rename(tempfile, path)?;
-
-    let blob = dst_file.meta().blob(src_filename);
-
-    db::insert(blob).expect("failed to insert blob");
+    let meta = store_zip(src_filepath, &tmp_path)?;
+    println!("hash={}", meta.digest());
+    update_meta(&tmp_path, src_filename, &meta)?;
 
     Ok(())
 }
