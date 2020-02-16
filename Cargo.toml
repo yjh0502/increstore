@@ -9,3 +9,6 @@ edition = "2018"
 [dependencies]
 zip = "0.5.4"
 tar = "0.4.26"
+rusqlite = "0.21.0"
+time = "0.1"
+sha1 = "0.6.0"
