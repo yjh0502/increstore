@@ -11,6 +11,13 @@ pub struct WriteMetadata {
 }
 
 impl WriteMetadata {
+    fn new() -> Self {
+        Self {
+            size: 0,
+            time_created: time::now().to_timespec(),
+            hash: sha1::Sha1::new(),
+        }
+    }
     fn blob(&self, filename: &str) -> db::Blob {
         let digest = self.hash.digest();
         db::Blob {
@@ -37,11 +44,7 @@ pub struct HashWrite<W> {
 impl<W> HashWrite<W> {
     fn new(w: W) -> Self {
         Self {
-            meta: WriteMetadata {
-                size: 0,
-                time_created: time::now().to_timespec(),
-                hash: sha1::Sha1::new(),
-            },
+            meta: WriteMetadata::new(),
             w,
         }
     }
@@ -65,6 +68,45 @@ impl<W: io::Write> io::Write for HashWrite<W> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.w.flush()
+    }
+}
+
+use std::marker::Unpin;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+impl<W> async_std::io::Write for HashWrite<W>
+where
+    W: async_std::io::Write + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        ctx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let mut s = self.as_mut();
+        let w = Pin::new(&mut s.w);
+        match w.poll_write(ctx, buf) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(n)) => {
+                s.meta.size += n as u64;
+                s.meta.hash.update(&buf[..n]);
+                Poll::Ready(Ok(n))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
+        let mut s = self.as_mut();
+        let w = Pin::new(&mut s.w);
+        w.poll_flush(ctx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
+        let mut s = self.as_mut();
+        let w = Pin::new(&mut s.w);
+        w.poll_close(ctx)
     }
 }
 
@@ -110,13 +152,30 @@ fn filepath(digest: sha1::Digest) -> String {
     format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..])
 }
 
-fn store_zip(src_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata> {
-    let mut src_file = std::fs::File::open(src_path)?;
+fn store_zip(input_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata> {
+    let mut input_file = std::fs::File::open(input_path)?;
     let dst_file = std::fs::File::create(&dst_path)?;
 
     let mut dst_file = HashWrite::new(io::BufWriter::new(dst_file));
 
-    zip_to_tar(&mut src_file, &mut dst_file)?;
+    zip_to_tar(&mut input_file, &mut dst_file)?;
+
+    Ok(dst_file.meta())
+}
+
+async fn store_zip_delta<R: async_std::io::Read + std::marker::Unpin>(
+    src_reader: R,
+    input_path: &str,
+    dst_path: &str,
+) -> std::io::Result<WriteMetadata> {
+    let mut input_file = async_std::fs::File::create(input_path).await?;
+    let dst_file = async_std::fs::File::create(dst_path).await?;
+
+    let mut dst_file = HashWrite::new(dst_file);
+
+    xdelta3::stream::encode_async(src_reader, &mut input_file, &mut dst_file)
+        .await
+        .expect("failed to encode");
 
     Ok(dst_file.meta())
 }
@@ -136,20 +195,45 @@ fn update_meta(tmp_path: &str, filename: &str, meta: &WriteMetadata) -> std::io:
 }
 
 fn main() -> io::Result<()> {
+    env_logger::init();
+
     db::prepare().expect("failed to prepare");
 
-    let tmp_path = format!("{}/tmp", prefix());
+    if false {
+        let tmp_path = format!("{}/tmp", prefix());
 
-    let src_filepath = &format!("{}/test.apk", prefix());
-    let src_filename = Path::new(&src_filepath)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap();
+        let input_filepath = &format!("{}/test.apk", prefix());
+        let input_filename = Path::new(&input_filepath)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
 
-    let meta = store_zip(src_filepath, &tmp_path)?;
-    println!("hash={}", meta.digest());
-    update_meta(&tmp_path, src_filename, &meta)?;
+        let meta = store_zip(input_filepath, &tmp_path)?;
+        println!("hash={}", meta.digest());
+        update_meta(&tmp_path, input_filename, &meta)?;
+    }
+
+    if true {
+        let tmp_path = format!("{}/tmp", prefix());
+
+        let input_filepath = &format!("{}/test.apk", prefix());
+        let input_filename = Path::new(&input_filepath)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap();
+
+        let src_path = "data/objects/80/c5f3e5aac07968800b5e7410a837d6b1538f23";
+
+        let meta = async_std::task::block_on(async {
+            let src_file = async_std::fs::File::open(&src_path).await?;
+            store_zip_delta(src_file, &input_filepath, &tmp_path).await
+        })?;
+
+        println!("hash={}", meta.digest());
+        update_meta(&tmp_path, input_filename, &meta)?;
+    }
 
     Ok(())
 }
