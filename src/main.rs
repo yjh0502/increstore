@@ -1,17 +1,62 @@
 use std::io;
+use std::path::Path;
 
 mod db;
 
-struct HashWrite<W> {
+#[derive(Clone)]
+pub struct WriteMetadata {
+    size: u64,
+    time_created: time::Timespec,
     hash: sha1::Sha1,
+}
+
+impl WriteMetadata {
+    fn blob(&self, filename: &str) -> db::Blob {
+        let digest = self.hash.digest();
+        db::Blob {
+            id: 0,
+            filename: filename.to_owned(),
+            time_created: self.time_created,
+            size: self.size,
+            content_hash: format!("{}", digest),
+            store_hash: format!("{}", digest),
+            parent_hash: None,
+        }
+    }
+}
+
+pub struct HashWrite<W> {
+    meta: WriteMetadata,
     w: W,
+}
+
+impl<W> HashWrite<W> {
+    fn new(w: W) -> Self {
+        Self {
+            meta: WriteMetadata {
+                size: 0,
+                time_created: time::now().to_timespec(),
+                hash: sha1::Sha1::new(),
+            },
+            w,
+        }
+    }
+
+    fn meta(&self) -> WriteMetadata {
+        self.meta.clone()
+    }
+
+    fn digest(&self) -> sha1::Digest {
+        self.meta.hash.digest()
+    }
 }
 
 impl<W: io::Write> io::Write for HashWrite<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self.w.write(buf) {
             Ok(n) => {
-                self.hash.update(&buf[..n]);
+                self.meta.size += n as u64;
+                self.meta.hash.update(&buf[..n]);
                 Ok(n)
             }
             Err(e) => Err(e),
@@ -20,19 +65,6 @@ impl<W: io::Write> io::Write for HashWrite<W> {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.w.flush()
-    }
-}
-
-impl<W> HashWrite<W> {
-    fn new(w: W) -> Self {
-        Self {
-            hash: sha1::Sha1::new(),
-            w,
-        }
-    }
-
-    fn digest(&self) -> sha1::Digest {
-        self.hash.digest()
     }
 }
 
@@ -69,17 +101,46 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) ->
     Ok(())
 }
 
+fn prefix() -> &'static str {
+    "data"
+}
+
+fn filepath(digest: sha1::Digest) -> String {
+    let s = format!("{}", digest);
+    format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..])
+}
+
 fn main() -> io::Result<()> {
     db::prepare().expect("failed to prepare");
 
-    let mut src_file = std::fs::File::open("data/test.apk")?;
-    let dst_file = std::fs::File::create("data/test.tar")?;
+    let tempfile = format!("{}/tmp", prefix());
+
+    let src_filepath = &format!("{}/test.apk", prefix());
+    let src_filename = Path::new(&src_filepath)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let mut src_file = std::fs::File::open(src_filepath)?;
+    let dst_file = std::fs::File::create(&tempfile)?;
 
     let mut dst_file = HashWrite::new(io::BufWriter::new(dst_file));
 
     zip_to_tar(&mut src_file, &mut dst_file)?;
 
-    println!("hash={:?}", dst_file.digest());
+    println!("hash={}", dst_file.digest());
+
+    let path = filepath(dst_file.digest());
+
+    if let Some(dir) = Path::new(&path).parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::rename(tempfile, path)?;
+
+    let blob = dst_file.meta().blob(src_filename);
+
+    db::insert(blob).expect("failed to insert blob");
 
     Ok(())
 }
