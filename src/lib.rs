@@ -221,7 +221,7 @@ fn update_blob(tmp_path: &str, blob: &db::Blob) -> std::io::Result<()> {
     Ok(())
 }
 
-fn main() -> io::Result<()> {
+pub fn main() -> io::Result<()> {
     env_logger::init();
 
     db::prepare().expect("failed to prepare");
