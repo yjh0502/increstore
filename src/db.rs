@@ -45,6 +45,38 @@ create table if not exists blobs (
     Ok(())
 }
 
+pub fn latest() -> Result<Blob> {
+    let conn = Connection::open(dbpath())?;
+
+    let res = conn.query_row(
+        r#"
+select
+    id, filename, time_created,
+    store_size, content_size, store_hash, content_hash, parent_hash
+from blobs
+order by id desc
+limit 1"#,
+        params![],
+        |row| {
+            let store_size: i64 = row.get(3)?;
+            let content_size: i64 = row.get(4)?;
+            Ok(Blob {
+                id: row.get(0)?,
+                filename: row.get(1)?,
+                time_created: row.get(2)?,
+                store_size: store_size as u64,
+                content_size: content_size as u64,
+                store_hash: row.get(5)?,
+                content_hash: row.get(6)?,
+
+                parent_hash: row.get(7)?,
+            })
+        },
+    )?;
+
+    Ok(res)
+}
+
 pub fn insert(blob: &Blob) -> Result<()> {
     let conn = Connection::open(dbpath())?;
 

@@ -208,16 +208,55 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     Ok((input_meta, dst_meta))
 }
 
+fn store_object(src_path: &str, dst_path: &str) -> std::io::Result<()> {
+    if let Some(dir) = Path::new(&dst_path).parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::rename(src_path, dst_path)
+}
+
 fn update_blob(tmp_path: &str, blob: &db::Blob) -> std::io::Result<()> {
     let path = filepath(&blob.store_hash);
 
     info!("path={}", path);
-    if let Some(dir) = Path::new(&path).parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    std::fs::rename(tmp_path, path)?;
+    store_object(tmp_path, &path)?;
 
     db::insert(blob).expect("failed to insert blob");
+    Ok(())
+}
+
+fn append_zip(input_filepath: &str) -> std::io::Result<()> {
+    let latest = db::latest().expect("failed to get latest row");
+
+    let src_hash = &latest.content_hash;
+    let src_filepath = filepath(src_hash);
+
+    let tmp_unzip_path = format!("{}/tmp_unzip", prefix());
+    let tmp_path = format!("{}/tmp", prefix());
+
+    let input_filename = Path::new(&input_filepath)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let meta = store_zip(input_filepath, &tmp_unzip_path)?;
+    let input_blob = meta.blob(input_filename);
+
+    let (_input_meta, dst_meta) = async_std::task::block_on(async {
+        let src_file = async_std::fs::File::open(&src_filepath).await?;
+        store_delta(src_file, &tmp_unzip_path, &tmp_path).await
+    })?;
+
+    let mut blob = dst_meta.blob(input_filename);
+    blob.content_size = input_blob.content_size;
+    blob.content_hash = input_blob.content_hash.clone();
+
+    debug!(
+        "content_hash={}, store_hash={}",
+        blob.content_hash, blob.store_hash
+    );
+    update_blob(&tmp_path, &blob)?;
     Ok(())
 }
 
@@ -226,7 +265,7 @@ pub fn main() -> io::Result<()> {
 
     db::prepare().expect("failed to prepare");
 
-    let first_blob = {
+    {
         let tmp_path = format!("{}/tmp", prefix());
 
         let input_filepath = &format!("{}/test.apk", prefix());
@@ -245,35 +284,8 @@ pub fn main() -> io::Result<()> {
     };
 
     if true {
-        let tmp_unzip_path = format!("{}/tmp_unzip", prefix());
         let input_filepath = &format!("{}/test.apk", prefix());
-        let tmp_path = format!("{}/tmp", prefix());
-
-        let input_filename = Path::new(&input_filepath)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        let meta = store_zip(input_filepath, &tmp_unzip_path)?;
-        let input_blob = meta.blob(input_filename);
-
-        let src_path = filepath(&first_blob.store_hash);
-
-        let (_input_meta, dst_meta) = async_std::task::block_on(async {
-            let src_file = async_std::fs::File::open(&src_path).await?;
-            store_delta(src_file, &tmp_unzip_path, &tmp_path).await
-        })?;
-
-        let mut blob = dst_meta.blob(input_filename);
-        blob.content_size = input_blob.content_size;
-        blob.content_hash = input_blob.content_hash.clone();
-
-        debug!(
-            "content_hash={}, store_hash={}",
-            blob.content_hash, blob.store_hash
-        );
-        update_blob(&tmp_path, &blob)?;
+        append_zip(&input_filepath)?;
     }
 
     Ok(())
