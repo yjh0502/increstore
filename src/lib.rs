@@ -5,7 +5,7 @@ use async_std::task::ready;
 use std::io;
 use std::path::Path;
 
-mod db;
+pub mod db;
 
 #[derive(Clone)]
 pub struct WriteMetadata {
@@ -182,6 +182,7 @@ fn store_zip(input_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata>
 
     let mut dst_file = HashRW::new(io::BufWriter::new(dst_file));
 
+    debug!("zip_to_tar: src={}, dst={}", &input_path, &dst_path);
     zip_to_tar(&mut input_file, &mut dst_file)?;
 
     Ok(dst_file.meta())
@@ -209,8 +210,12 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
 }
 
 fn store_object(src_path: &str, dst_path: &str) -> std::io::Result<()> {
+    debug!("store_object: src={}, dst={}", &src_path, &dst_path);
+
     if let Some(dir) = Path::new(&dst_path).parent() {
         std::fs::create_dir_all(dir)?;
+    } else {
+        error!("failed to get a parent directory: {}", dst_path);
     }
     std::fs::rename(src_path, dst_path)
 }
@@ -225,8 +230,36 @@ fn update_blob(tmp_path: &str, blob: &db::Blob) -> std::io::Result<()> {
     Ok(())
 }
 
-fn append_zip(input_filepath: &str) -> std::io::Result<()> {
-    let latest = db::latest().expect("failed to get latest row");
+pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
+    match db::latest() {
+        Ok(latest) => append_zip_delta(input_filepath, &latest),
+        Err(_e) => append_zip_full(input_filepath),
+    }
+}
+
+fn append_zip_full(input_filepath: &str) -> io::Result<()> {
+    debug!("append_zip_full: input_filepath={}", input_filepath);
+
+    let tmp_path = format!("{}/tmp", prefix());
+    let input_filename = Path::new(&input_filepath)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+
+    let meta = store_zip(input_filepath, &tmp_path)?;
+    debug!("hash={}", meta.digest());
+
+    let blob = meta.blob(input_filename);
+    update_blob(&tmp_path, &blob)?;
+    Ok(())
+}
+
+fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<()> {
+    debug!(
+        "append_zip_delta: input_filepath={}, latest={:?}",
+        input_filepath, latest
+    );
 
     let src_hash = &latest.content_hash;
     let src_filepath = filepath(src_hash);
@@ -248,6 +281,9 @@ fn append_zip(input_filepath: &str) -> std::io::Result<()> {
         store_delta(src_file, &tmp_unzip_path, &tmp_path).await
     })?;
 
+    let store_filename = filepath(&meta.blob(input_filename).store_hash);
+    store_object(&tmp_unzip_path, &store_filename)?;
+
     let mut blob = dst_meta.blob(input_filename);
     blob.content_size = input_blob.content_size;
     blob.content_hash = input_blob.content_hash.clone();
@@ -257,18 +293,22 @@ fn append_zip(input_filepath: &str) -> std::io::Result<()> {
         blob.content_hash, blob.store_hash
     );
     update_blob(&tmp_path, &blob)?;
+
+    // remove old object
+    std::fs::remove_file(&filepath(&latest.content_hash))?;
+
     Ok(())
 }
 
 pub fn main() -> io::Result<()> {
     env_logger::init();
-
     db::prepare().expect("failed to prepare");
 
     {
         let tmp_path = format!("{}/tmp", prefix());
-
         let input_filepath = &format!("{}/test.apk", prefix());
+        append_zip_full(&input_filepath)?;
+
         let input_filename = Path::new(&input_filepath)
             .file_name()
             .unwrap()
@@ -285,7 +325,7 @@ pub fn main() -> io::Result<()> {
 
     if true {
         let input_filepath = &format!("{}/test.apk", prefix());
-        append_zip(&input_filepath)?;
+        push_zip(&input_filepath)?;
     }
 
     Ok(())

@@ -1,5 +1,6 @@
 use rusqlite::{params, Connection, Result};
 
+#[derive(Debug)]
 pub struct Blob {
     pub id: u32,
     pub filename: String,
