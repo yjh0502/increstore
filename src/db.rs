@@ -14,6 +14,12 @@ pub struct Blob {
     pub parent_hash: Option<String>,
 }
 
+impl Blob {
+    pub fn compression_ratio(&self) -> f32 {
+        self.store_size as f32 / self.content_size as f32
+    }
+}
+
 fn dbpath() -> &'static str {
     "data/meta.db"
 }

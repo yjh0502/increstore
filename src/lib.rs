@@ -304,9 +304,11 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     // remove old object
     std::fs::remove_file(&filepath(&latest.content_hash))?;
 
-    debug!(
-        "append_zip_delta: dt_store_zip={}ms, dt_store_delta={}ms",
-        dt_store_zip, dt_store_delta,
+    info!(
+        "append_zip_delta: ratio={:.02}% dt_store_zip={}ms, dt_store_delta={}ms",
+        blob.compression_ratio() * 100.0,
+        dt_store_zip,
+        dt_store_delta,
     );
 
     Ok(())
