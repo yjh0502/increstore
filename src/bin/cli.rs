@@ -10,7 +10,7 @@ struct TopLevel {
 #[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand)]
 enum MySubCommandEnum {
-    One(SubCommandPush),
+    Push(SubCommandPush),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -28,7 +28,7 @@ fn main() -> std::io::Result<()> {
     let up: TopLevel = argh::from_env();
 
     match up.nested {
-        MySubCommandEnum::One(push) => {
+        MySubCommandEnum::Push(push) => {
             increstore::push_zip(&push.filename)?;
         }
     }
