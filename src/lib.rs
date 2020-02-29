@@ -2,6 +2,7 @@
 extern crate log;
 
 use async_std::task::ready;
+use pbr::ProgressBar;
 use std::io;
 use std::path::Path;
 use stopwatch::Stopwatch;
@@ -140,6 +141,8 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) ->
     let mut zip = zip::ZipArchive::new(src)?;
     let mut ar = tar::Builder::new(dst);
 
+    let mut pb = ProgressBar::new(zip.len() as u64);
+
     for i in 0..zip.len() {
         let mut file = zip.by_index(i)?;
         let filename = file.name().to_owned();
@@ -164,7 +167,9 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) ->
         header.set_cksum();
 
         ar.append(&mut header, &mut file)?;
+        pb.inc();
     }
+    pb.finish();
 
     Ok(())
 }
@@ -200,9 +205,16 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     let mut input_file = HashRW::new(input_file);
     let mut dst_file = HashRW::new(dst_file);
 
-    xdelta3::stream::encode_async(src_reader, &mut input_file, &mut dst_file)
-        .await
-        .expect("failed to encode");
+    let cfg = xdelta3::stream::Xd3Config::new().window_size(100_000_000);
+    xdelta3::stream::process_async(
+        cfg,
+        xdelta3::stream::ProcessMode::Encode,
+        src_reader,
+        &mut input_file,
+        &mut dst_file,
+    )
+    .await
+    .expect("failed to encode");
 
     let input_meta = input_file.meta();
     let dst_meta = dst_file.meta();
@@ -224,7 +236,7 @@ fn store_object(src_path: &str, dst_path: &str) -> std::io::Result<()> {
 fn update_blob(tmp_path: &str, blob: &db::Blob) -> std::io::Result<()> {
     let path = filepath(&blob.store_hash);
 
-    info!("path={}", path);
+    trace!("path={}", path);
     store_object(tmp_path, &path)?;
 
     db::insert(blob).expect("failed to insert blob");
