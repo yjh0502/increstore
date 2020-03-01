@@ -74,6 +74,7 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     dst_path: &str,
 ) -> std::io::Result<(WriteMetadata, WriteMetadata)> {
     use async_std::{fs, io};
+
     let input_file = fs::File::open(input_path).await?;
     let dst_file = fs::File::create(dst_path).await?;
 
@@ -183,6 +184,7 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     let mut blob = dst_meta.blob(input_filename);
     blob.content_size = input_blob.content_size;
     blob.content_hash = input_blob.content_hash.clone();
+    blob.parent_hash = Some(src_hash.to_owned());
 
     trace!(
         "content_hash={}, store_hash={}",
