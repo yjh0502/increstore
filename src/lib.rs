@@ -205,12 +205,14 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     let mut input_file = HashRW::new(input_file);
     let mut dst_file = HashRW::new(dst_file);
 
-    let cfg = xdelta3::stream::Xd3Config::new().window_size(100_000_000);
+    let cfg = xdelta3::stream::Xd3Config::new()
+        .source_window_size(100_000_000)
+        .no_compress(true);
     xdelta3::stream::process_async(
         cfg,
         xdelta3::stream::ProcessMode::Encode,
-        src_reader,
         &mut input_file,
+        src_reader,
         &mut dst_file,
     )
     .await
