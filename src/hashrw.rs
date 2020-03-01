@@ -16,6 +16,7 @@ pub struct WriteMetadata {
 
 impl WriteMetadata {
     pub fn new() -> Self {
+        // TODO
         let key = highway::Key([1, 2, 3, 4]);
         Self {
             size: 0,
@@ -100,7 +101,7 @@ where
         ctx: &mut Context,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        debug!("HashRw::poll_write size={}", buf.len());
+        // debug!("HashRw::poll_write size={}", buf.len());
 
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
