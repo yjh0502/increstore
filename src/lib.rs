@@ -1,141 +1,15 @@
 #[macro_use]
 extern crate log;
 
-use async_std::task::ready;
 use pbr::ProgressBar;
 use std::io;
 use std::path::Path;
 use stopwatch::Stopwatch;
 
 pub mod db;
+pub mod hashrw;
 
-#[derive(Clone)]
-pub struct WriteMetadata {
-    size: u64,
-    time_created: time::Timespec,
-    hash: sha1::Sha1,
-}
-
-impl WriteMetadata {
-    fn new() -> Self {
-        Self {
-            size: 0,
-            time_created: time::now().to_timespec(),
-            hash: sha1::Sha1::new(),
-        }
-    }
-    fn blob(&self, filename: &str) -> db::Blob {
-        let digest = self.hash.digest();
-        db::Blob {
-            id: 0,
-            filename: filename.to_owned(),
-            time_created: self.time_created,
-            store_size: self.size,
-            content_size: self.size,
-            store_hash: format!("{}", digest),
-            content_hash: format!("{}", digest),
-            parent_hash: None,
-        }
-    }
-
-    fn digest(&self) -> sha1::Digest {
-        self.hash.digest()
-    }
-}
-
-pub struct HashRW<W> {
-    meta: WriteMetadata,
-    w: W,
-}
-
-impl<W> HashRW<W> {
-    fn new(w: W) -> Self {
-        HashRW {
-            meta: WriteMetadata::new(),
-            w,
-        }
-    }
-
-    fn meta(&self) -> WriteMetadata {
-        self.meta.clone()
-    }
-}
-
-impl<W: io::Write> io::Write for HashRW<W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self.w.write(buf) {
-            Ok(n) => {
-                self.meta.size += n as u64;
-                self.meta.hash.update(&buf[..n]);
-                Ok(n)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.w.flush()
-    }
-}
-
-use std::marker::Unpin;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-impl<W> async_std::io::Write for HashRW<W>
-where
-    W: async_std::io::Write + Unpin,
-{
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        ctx: &mut Context,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        match ready!(w.poll_write(ctx, buf)) {
-            Ok(n) => {
-                s.meta.size += n as u64;
-                s.meta.hash.update(&buf[..n]);
-                Poll::Ready(Ok(n))
-            }
-            Err(e) => Poll::Ready(Err(e)),
-        }
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        w.poll_flush(ctx)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        w.poll_close(ctx)
-    }
-}
-
-impl<W> async_std::io::Read for HashRW<W>
-where
-    W: async_std::io::Read + Unpin,
-{
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        ctx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        match ready!(w.poll_read(ctx, buf)) {
-            Ok(res) => {
-                s.meta.hash.update(&buf[..res]);
-                Poll::Ready(Ok(res))
-            }
-            Err(e) => Poll::Ready(Err(e)),
-        }
-    }
-}
+use hashrw::*;
 
 fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) -> io::Result<()> {
     let mut zip = zip::ZipArchive::new(src)?;
@@ -207,7 +81,8 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
 
     let cfg = xdelta3::stream::Xd3Config::new()
         .source_window_size(100_000_000)
-        .no_compress(true);
+        .no_compress(true)
+        .level(0);
     xdelta3::stream::process_async(
         cfg,
         xdelta3::stream::ProcessMode::Encode,
@@ -316,6 +191,7 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     update_blob(&tmp_path, &blob)?;
 
     // remove old object
+    // TODO: smarter...
     std::fs::remove_file(&filepath(&latest.content_hash))?;
 
     info!(
