@@ -11,7 +11,7 @@ pub mod hashrw;
 
 use hashrw::*;
 
-fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) -> io::Result<()> {
+fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: R, dst: W) -> io::Result<()> {
     let mut zip = zip::ZipArchive::new(src)?;
     let mut ar = tar::Builder::new(dst);
 
@@ -48,7 +48,7 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: &mut R, dst: &mut W) ->
     Ok(())
 }
 
-fn prefix() -> &'static str {
+pub fn prefix() -> &'static str {
     "data"
 }
 
@@ -60,10 +60,10 @@ fn store_zip(input_path: &str, dst_path: &str) -> std::io::Result<WriteMetadata>
     let mut input_file = std::fs::File::open(input_path)?;
     let dst_file = std::fs::File::create(&dst_path)?;
 
-    let mut dst_file = HashRW::new(io::BufWriter::new(dst_file));
+    let mut dst_file = HashRW::new(dst_file);
 
     trace!("zip_to_tar: src={}, dst={}", &input_path, &dst_path);
-    zip_to_tar(&mut input_file, &mut dst_file)?;
+    zip_to_tar(&mut input_file, io::BufWriter::new(&mut dst_file))?;
 
     Ok(dst_file.meta())
 }
@@ -73,8 +73,9 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     input_path: &str,
     dst_path: &str,
 ) -> std::io::Result<(WriteMetadata, WriteMetadata)> {
-    let input_file = async_std::fs::File::open(input_path).await?;
-    let dst_file = async_std::fs::File::create(dst_path).await?;
+    use async_std::{fs, io};
+    let input_file = fs::File::open(input_path).await?;
+    let dst_file = fs::File::create(dst_path).await?;
 
     let mut input_file = HashRW::new(input_file);
     let mut dst_file = HashRW::new(dst_file);
@@ -86,9 +87,9 @@ async fn store_delta<R: async_std::io::Read + std::marker::Unpin>(
     xdelta3::stream::process_async(
         cfg,
         xdelta3::stream::ProcessMode::Encode,
-        &mut input_file,
+        io::BufReader::new(&mut input_file),
         src_reader,
-        &mut dst_file,
+        io::BufWriter::new(&mut dst_file),
     )
     .await
     .expect("failed to encode");

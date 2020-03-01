@@ -1,6 +1,7 @@
 use std::io;
 
 use async_std::task::ready;
+use highway::*;
 
 use super::db;
 
@@ -8,34 +9,44 @@ use super::db;
 pub struct WriteMetadata {
     size: u64,
     time_created: time::Timespec,
-    hash: sha1::Sha1,
+
+    // hash: sha1::Sha1,
+    hash0: SseHash,
 }
 
 impl WriteMetadata {
     pub fn new() -> Self {
+        let key = highway::Key([1, 2, 3, 4]);
         Self {
             size: 0,
             time_created: time::now().to_timespec(),
-            hash: sha1::Sha1::new(),
+            // hash: sha1::Sha1::new(),
+            hash0: SseHash::new(&key).unwrap(),
         }
     }
 
     pub fn blob(&self, filename: &str) -> db::Blob {
-        let digest = self.hash.digest();
+        let digest = self.digest();
         db::Blob {
             id: 0,
             filename: filename.to_owned(),
             time_created: self.time_created,
             store_size: self.size,
             content_size: self.size,
-            store_hash: format!("{}", digest),
-            content_hash: format!("{}", digest),
+            store_hash: digest.clone(),
+            content_hash: digest.clone(),
             parent_hash: None,
         }
     }
 
-    pub fn digest(&self) -> sha1::Digest {
-        self.hash.digest()
+    pub fn digest(&self) -> String {
+        use std::fmt::Write;
+        let digest = self.hash0.clone().finalize256();
+        let mut s = String::new();
+        for val in &digest {
+            write!(&mut s, "{:016x}", val).unwrap();
+        }
+        s
     }
 }
 
@@ -59,10 +70,12 @@ impl<W> HashRW<W> {
 
 impl<W: io::Write> io::Write for HashRW<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        // debug!("HashRw::write size={}", buf.len());
         match self.w.write(buf) {
             Ok(n) => {
                 self.meta.size += n as u64;
-                self.meta.hash.update(&buf[..n]);
+                // self.meta.hash.update(&buf[..n]);
+                self.meta.hash0.append(&buf[..n]);
                 Ok(n)
             }
             Err(e) => Err(e),
@@ -87,12 +100,15 @@ where
         ctx: &mut Context,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        debug!("HashRw::poll_write size={}", buf.len());
+
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
         match ready!(w.poll_write(ctx, buf)) {
             Ok(n) => {
                 s.meta.size += n as u64;
-                s.meta.hash.update(&buf[..n]);
+                // s.meta.hash.update(&buf[..n]);
+                s.meta.hash0.append(&buf[..n]);
                 Poll::Ready(Ok(n))
             }
             Err(e) => Poll::Ready(Err(e)),
@@ -121,12 +137,15 @@ where
         ctx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
+        // debug!("HashRw::poll_read size={}", buf.len());
+
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
         match ready!(w.poll_read(ctx, buf)) {
-            Ok(res) => {
-                s.meta.hash.update(&buf[..res]);
-                Poll::Ready(Ok(res))
+            Ok(n) => {
+                // s.meta.hash.update(&buf[..n]);
+                s.meta.hash0.append(&buf[..n]);
+                Poll::Ready(Ok(n))
             }
             Err(e) => Poll::Ready(Err(e)),
         }

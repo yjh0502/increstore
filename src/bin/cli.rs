@@ -23,6 +23,9 @@ struct SubCommandPush {
 
 fn main() -> std::io::Result<()> {
     env_logger::init();
+
+    std::fs::create_dir_all(increstore::prefix()).expect("failed to create dir");
+
     increstore::db::prepare().expect("failed to prepare");
 
     let up: TopLevel = argh::from_env();
