@@ -147,6 +147,27 @@ fn append_zip_full(input_filepath: &str) -> io::Result<()> {
     Ok(())
 }
 
+fn cleanup(hash: &str) -> std::io::Result<()> {
+    let mut blob = db::get(hash).expect("db::get");
+
+    while let Some(parent_hash) = &blob.parent_hash {
+        match std::fs::remove_file(&filepath(&blob.content_hash)) {
+            Ok(()) => {
+                debug!(
+                    "cleanup: filename={}, content_hash={}",
+                    blob.filename, blob.content_hash
+                );
+                blob = db::get(parent_hash).expect("db::get");
+            }
+            Err(_e) => {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<()> {
     debug!(
         "append_zip_delta: input_filepath={}, latest={}",
@@ -193,16 +214,14 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     );
     update_blob(&tmp_path, &blob)?;
 
-    // remove old object
-    // TODO: smarter...
-    std::fs::remove_file(&filepath(&latest.content_hash))?;
-
     info!(
         "append_zip_delta: ratio={:.02}% dt_store_zip={}ms, dt_store_delta={}ms",
         blob.compression_ratio() * 100.0,
         dt_store_zip,
         dt_store_delta,
     );
+
+    cleanup(src_hash)?;
 
     Ok(())
 }

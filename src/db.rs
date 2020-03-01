@@ -52,10 +52,42 @@ create table if not exists blobs (
     Ok(())
 }
 
+pub fn get(content_hash: &str) -> Result<Blob> {
+    let conn = Connection::open(dbpath())?;
+
+    conn.query_row(
+        r#"
+select
+    id, filename, time_created,
+    store_size, content_size, store_hash, content_hash, parent_hash
+from blobs
+where content_hash = ?
+"#,
+        params![content_hash],
+        decode_row,
+    )
+}
+
+fn decode_row(row: &rusqlite::Row) -> Result<Blob> {
+    let store_size: i64 = row.get(3)?;
+    let content_size: i64 = row.get(4)?;
+    Ok(Blob {
+        id: row.get(0)?,
+        filename: row.get(1)?,
+        time_created: row.get(2)?,
+        store_size: store_size as u64,
+        content_size: content_size as u64,
+        store_hash: row.get(5)?,
+        content_hash: row.get(6)?,
+
+        parent_hash: row.get(7)?,
+    })
+}
+
 pub fn latest() -> Result<Blob> {
     let conn = Connection::open(dbpath())?;
 
-    let res = conn.query_row(
+    conn.query_row(
         r#"
 select
     id, filename, time_created,
@@ -64,24 +96,8 @@ from blobs
 order by id desc
 limit 1"#,
         params![],
-        |row| {
-            let store_size: i64 = row.get(3)?;
-            let content_size: i64 = row.get(4)?;
-            Ok(Blob {
-                id: row.get(0)?,
-                filename: row.get(1)?,
-                time_created: row.get(2)?,
-                store_size: store_size as u64,
-                content_size: content_size as u64,
-                store_hash: row.get(5)?,
-                content_hash: row.get(6)?,
-
-                parent_hash: row.get(7)?,
-            })
-        },
-    )?;
-
-    Ok(res)
+        decode_row,
+    )
 }
 
 pub fn insert(blob: &Blob) -> Result<()> {
