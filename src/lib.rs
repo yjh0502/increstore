@@ -98,21 +98,8 @@ pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
 fn append_zip_full(input_filepath: &str) -> io::Result<()> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
-    let tmp_dir = format!("{}/tmp", prefix());
-    std::fs::create_dir_all(&tmp_dir)?;
-    let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
-
-    let input_filename = Path::new(&input_filepath)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap();
-
-    let meta = store_zip(input_filepath, tmp_path.path(), true)?;
-    trace!("hash={}", meta.digest());
-
-    let blob = meta.blob(input_filename);
-    update_blob(tmp_path, &blob)?;
+    let blob = store_zip_blob(input_filepath)?;
+    db::insert(&blob).expect("failed to insert blob");
     Ok(())
 }
 
@@ -137,12 +124,7 @@ fn cleanup(hash: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<()> {
-    debug!(
-        "append_zip_delta: input_filepath={}, latest={}",
-        input_filepath, latest.filename
-    );
-
+fn store_zip_blob(input_filepath: &str) -> std::io::Result<db::Blob> {
     let input_filename = Path::new(&input_filepath)
         .file_name()
         .unwrap()
@@ -152,21 +134,32 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     let tmp_dir = format!("{}/tmp", prefix());
     std::fs::create_dir_all(&tmp_dir)?;
 
+    let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
+
+    let meta = store_zip(input_filepath, tmp_unzip_path.path(), true)?;
+
+    let input_blob = meta.blob(input_filename);
+    let store_filepath = filepath(&input_blob.store_hash);
+    store_object(tmp_unzip_path, &store_filepath)?;
+    Ok(input_blob)
+}
+
+fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<()> {
+    debug!(
+        "append_zip_delta: input_filepath={}, latest={}",
+        input_filepath, latest.filename
+    );
+
     let sw = Stopwatch::start_new();
-    let (input_blob, store_filepath) = {
-        let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
-
-        let meta = store_zip(input_filepath, tmp_unzip_path.path(), true)?;
-
-        let input_blob = meta.blob(input_filename);
-        let store_filepath = filepath(&input_blob.store_hash);
-        store_object(tmp_unzip_path, &store_filepath)?;
-        (input_blob, store_filepath)
-    };
+    let input_blob = store_zip_blob(input_filepath)?;
+    let input_filepath = filepath(&input_blob.store_hash);
     let dt_store_zip = sw.elapsed_ms();
 
     let sw = Stopwatch::start_new();
     let blob = {
+        let tmp_dir = format!("{}/tmp", prefix());
+        std::fs::create_dir_all(&tmp_dir)?;
+
         let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
 
         let src_hash = &latest.content_hash;
@@ -174,10 +167,10 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
 
         let (_input_meta, dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
-            store_delta(src_file, &store_filepath, &tmp_path).await
+            store_delta(src_file, &input_filepath, &tmp_path).await
         })?;
 
-        let mut blob = dst_meta.blob(input_filename);
+        let mut blob = dst_meta.blob(&input_blob.filename);
         blob.content_size = input_blob.content_size;
         blob.content_hash = input_blob.content_hash.clone();
         blob.parent_hash = Some(src_hash.to_owned());
