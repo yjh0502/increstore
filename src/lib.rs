@@ -8,7 +8,7 @@ use tempfile::*;
 
 pub mod db;
 mod hashrw;
-mod zip;
+pub mod zip;
 
 use crate::zip::store_zip;
 use hashrw::*;
@@ -198,33 +198,14 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     Ok(())
 }
 
-pub fn main() -> io::Result<()> {
-    env_logger::init();
-    db::prepare().expect("failed to prepare");
+pub fn bench_zip(input_filepath: &str) -> std::io::Result<()> {
+    let temp_dir = format!("{}/tmp", prefix());
+    std::fs::create_dir_all(&temp_dir)?;
 
-    {
-        let tmp_path = format!("{}/tmp", prefix());
-        let input_filepath = &format!("{}/test.apk", prefix());
-        append_zip_full(&input_filepath)?;
+    let tempfile = NamedTempFile::new_in(&temp_dir)?;
 
-        let input_filename = Path::new(&input_filepath)
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        let meta = store_zip(input_filepath, &tmp_path)?;
-        trace!("hash={}", meta.digest());
-
-        let blob = meta.blob(input_filename);
-        update_blob(&tmp_path, &blob)?;
-        blob
-    };
-
-    if true {
-        let input_filepath = &format!("{}/test.apk", prefix());
-        push_zip(&input_filepath)?;
-    }
-
+    let ws = Stopwatch::start_new();
+    let _meta = store_zip(input_filepath, tempfile.path())?;
+    info!("store_zip took {}ms", ws.elapsed_ms());
     Ok(())
 }

@@ -11,12 +11,21 @@ struct TopLevel {
 #[argh(subcommand)]
 enum MySubCommandEnum {
     Push(SubCommandPush),
+    BenchZip(SubCommandBenchZip),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// First subcommand.
+/// push
 #[argh(subcommand, name = "push")]
 struct SubCommandPush {
+    #[argh(positional)]
+    filename: String,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// bench-zip
+#[argh(subcommand, name = "bench-zip")]
+struct SubCommandBenchZip {
     #[argh(positional)]
     filename: String,
 }
@@ -31,8 +40,11 @@ fn main() -> std::io::Result<()> {
     let up: TopLevel = argh::from_env();
 
     match up.nested {
-        MySubCommandEnum::Push(push) => {
-            increstore::push_zip(&push.filename)?;
+        MySubCommandEnum::Push(cmd) => {
+            increstore::push_zip(&cmd.filename)?;
+        }
+        MySubCommandEnum::BenchZip(cmd) => {
+            increstore::bench_zip(&cmd.filename)?;
         }
     }
 
