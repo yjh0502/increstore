@@ -59,10 +59,9 @@ where
     Ok((input_meta, dst_meta))
 }
 
-fn store_object<P1, P2>(src_path: P1, dst_path: P2) -> std::io::Result<()>
+fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> std::io::Result<()>
 where
-    P1: AsRef<Path>,
-    P2: AsRef<Path>,
+    P: AsRef<Path>,
 {
     trace!(
         "store_object: src={:?}, dst={:?}",
@@ -75,10 +74,11 @@ where
     } else {
         error!("failed to get a parent directory: {:?}", dst_path.as_ref());
     }
-    std::fs::rename(src_path, dst_path)
+    src_path.persist(dst_path)?;
+    Ok(())
 }
 
-fn update_blob<P: AsRef<Path>>(tmp_path: P, blob: &db::Blob) -> std::io::Result<()> {
+fn update_blob(tmp_path: NamedTempFile, blob: &db::Blob) -> std::io::Result<()> {
     let path = filepath(&blob.store_hash);
 
     trace!("path={}", path);
@@ -98,18 +98,20 @@ pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
 fn append_zip_full(input_filepath: &str) -> io::Result<()> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
-    let tmp_path = format!("{}/tmp", prefix());
+    let tmp_dir = format!("{}/tmp", prefix());
+    let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
+
     let input_filename = Path::new(&input_filepath)
         .file_name()
         .unwrap()
         .to_str()
         .unwrap();
 
-    let meta = store_zip(input_filepath, &tmp_path)?;
+    let meta = store_zip(input_filepath, tmp_path.path(), true)?;
     trace!("hash={}", meta.digest());
 
     let blob = meta.blob(input_filename);
-    update_blob(&tmp_path, &blob)?;
+    update_blob(tmp_path, &blob)?;
     Ok(())
 }
 
@@ -156,7 +158,7 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
         .unwrap();
 
     let sw = Stopwatch::start_new();
-    let meta = store_zip(input_filepath, tmp_unzip_path.path())?;
+    let meta = store_zip(input_filepath, tmp_unzip_path.path(), true)?;
     let dt_store_zip = sw.elapsed_ms();
 
     let input_blob = meta.blob(input_filename);
@@ -170,7 +172,6 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
 
     let store_filename = filepath(&meta.blob(input_filename).store_hash);
 
-    let (_, tmp_unzip_path) = tmp_unzip_path.keep()?;
     store_object(tmp_unzip_path, &store_filename)?;
 
     let mut blob = dst_meta.blob(input_filename);
@@ -183,8 +184,7 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
         blob.content_hash,
         blob.store_hash
     );
-    let (_, tmp_path) = tmp_path.keep()?;
-    update_blob(&tmp_path, &blob)?;
+    update_blob(tmp_path, &blob)?;
 
     info!(
         "append_zip_delta: ratio={:.02}% dt_store_zip={}ms, dt_store_delta={}ms",
@@ -198,14 +198,14 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     Ok(())
 }
 
-pub fn bench_zip(input_filepath: &str) -> std::io::Result<()> {
+pub fn bench_zip(input_filepath: &str, parallel: bool) -> std::io::Result<()> {
     let temp_dir = format!("{}/tmp", prefix());
     std::fs::create_dir_all(&temp_dir)?;
 
     let tempfile = NamedTempFile::new_in(&temp_dir)?;
 
     let ws = Stopwatch::start_new();
-    let _meta = store_zip(input_filepath, tempfile.path())?;
+    let _meta = store_zip(input_filepath, tempfile.path(), parallel)?;
     info!("store_zip took {}ms", ws.elapsed_ms());
     Ok(())
 }

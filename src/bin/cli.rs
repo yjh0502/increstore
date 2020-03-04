@@ -26,6 +26,8 @@ struct SubCommandPush {
 /// bench-zip
 #[argh(subcommand, name = "bench-zip")]
 struct SubCommandBenchZip {
+    #[argh(description = "parallel", switch, short = 'p')]
+    parallel: bool,
     #[argh(positional)]
     filename: String,
 }
@@ -44,7 +46,7 @@ fn main() -> std::io::Result<()> {
             increstore::push_zip(&cmd.filename)?;
         }
         MySubCommandEnum::BenchZip(cmd) => {
-            increstore::bench_zip(&cmd.filename)?;
+            increstore::bench_zip(&cmd.filename, cmd.parallel)?;
         }
     }
 

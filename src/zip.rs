@@ -78,7 +78,7 @@ fn zip_to_tar_par<P: AsRef<Path>, W: io::Write>(src_path: P, dst: W) -> io::Resu
         .try_fold((pb, ar), |(mut pb, mut ar), entry| {
             match ar.append(&entry.header, entry.data.as_slice()) {
                 Ok(_) => {
-                    // pb.inc();
+                    pb.inc();
                     future::ready(Ok((pb, ar)))
                 }
                 Err(e) => future::ready(Err(e)),
@@ -86,7 +86,7 @@ fn zip_to_tar_par<P: AsRef<Path>, W: io::Write>(src_path: P, dst: W) -> io::Resu
         });
 
     let (mut pb, _ar) = async_std::task::block_on(res)?;
-    // pb.finish();
+    pb.finish();
 
     Ok(())
 }
@@ -108,29 +108,32 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: R, dst: W) -> io::Resul
     Ok(())
 }
 
-pub fn store_zip<P1, P2>(input_path: P1, dst_path: P2) -> std::io::Result<WriteMetadata>
+pub fn store_zip<P1, P2>(
+    input_path: P1,
+    dst_path: P2,
+    parallel: bool,
+) -> std::io::Result<WriteMetadata>
 where
     P1: AsRef<Path>,
     P2: AsRef<Path>,
 {
-    let dst_file = std::fs::File::create(dst_path.as_ref())?;
-
-    let mut dst_file = HashRW::new(dst_file);
-
     trace!(
         "zip_to_tar: src={:?}, dst={:?}",
         input_path.as_ref(),
         dst_path.as_ref()
     );
 
-    if false {
-        let mut input_file = std::fs::File::open(input_path.as_ref())?;
-        zip_to_tar(&mut input_file, io::BufWriter::new(&mut dst_file))?;
-    } else {
+    let dst_file = std::fs::File::create(dst_path.as_ref())?;
+    let mut dst_file = HashRW::new(dst_file);
+
+    if parallel {
         zip_to_tar_par(
             input_path,
             io::BufWriter::with_capacity(1024 * 1024 * 8, &mut dst_file),
         )?;
+    } else {
+        let mut input_file = std::fs::File::open(input_path.as_ref())?;
+        zip_to_tar(&mut input_file, io::BufWriter::new(&mut dst_file))?;
     }
 
     Ok(dst_file.meta())
