@@ -99,6 +99,7 @@ fn append_zip_full(input_filepath: &str) -> io::Result<()> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
     let tmp_dir = format!("{}/tmp", prefix());
+    std::fs::create_dir_all(&tmp_dir)?;
     let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
 
     let input_filename = Path::new(&input_filepath)
@@ -145,11 +146,11 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     let src_hash = &latest.content_hash;
     let src_filepath = filepath(src_hash);
 
-    let temp_dir = format!("{}/tmp", prefix());
-    std::fs::create_dir_all(&temp_dir)?;
+    let tmp_dir = format!("{}/tmp", prefix());
+    std::fs::create_dir_all(&tmp_dir)?;
 
-    let tmp_unzip_path = NamedTempFile::new_in(&temp_dir)?;
-    let tmp_path = NamedTempFile::new_in(&temp_dir)?;
+    let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
+    let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
 
     let input_filename = Path::new(&input_filepath)
         .file_name()
@@ -199,10 +200,10 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
 }
 
 pub fn bench_zip(input_filepath: &str, parallel: bool) -> std::io::Result<()> {
-    let temp_dir = format!("{}/tmp", prefix());
-    std::fs::create_dir_all(&temp_dir)?;
+    let tmp_dir = format!("{}/tmp", prefix());
+    std::fs::create_dir_all(&tmp_dir)?;
 
-    let tempfile = NamedTempFile::new_in(&temp_dir)?;
+    let tempfile = NamedTempFile::new_in(&tmp_dir)?;
 
     let ws = Stopwatch::start_new();
     let _meta = store_zip(input_filepath, tempfile.path(), parallel)?;
