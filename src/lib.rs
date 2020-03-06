@@ -149,6 +149,8 @@ pub fn cleanup() -> io::Result<()> {
         debug!("root compression ratio: {}", s);
     }
 
+    // TODO: store distances
+
     for (root, _backref) in root_candidates.into_iter().skip(max_root_blobs()) {
         db::remove(&root).expect("db::remove");
         std::fs::remove_file(&filepath(&root.content_hash))?;
