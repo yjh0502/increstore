@@ -100,6 +100,32 @@ pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
     Ok(())
 }
 
+pub fn get(filename: &str, _out_filename: &str) -> std::io::Result<()> {
+    let mut blobs = db::by_filename(filename).expect("db::by_filename");
+    if blobs.is_empty() {
+        panic!("unknown filename: {}", filename);
+    }
+
+    let mut decode_path = Vec::new();
+
+    let mut blob = blobs.pop().unwrap();
+    while let Some(parent_hash) = &blob.parent_hash {
+        let mut blobs = db::by_content_hash(parent_hash).expect("db::by_content_hash");
+        assert!(!blobs.is_empty());
+
+        let old_blob = std::mem::replace(&mut blob, blobs.pop().unwrap());
+        decode_path.push(old_blob);
+    }
+    decode_path.push(blob);
+
+    decode_path.reverse();
+    for blob in decode_path {
+        debug!("{}", blob.filename);
+    }
+
+    Ok(())
+}
+
 fn append_zip_full(input_filepath: &str) -> io::Result<db::Blob> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
