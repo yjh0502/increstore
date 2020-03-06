@@ -15,7 +15,7 @@ enum MySubCommandEnum {
     BenchZip(SubCommandBenchZip),
 
     CleanUp(SubCommandCleanUp),
-    Depth(SubCommandDepth),
+    Stats(SubCommandStats),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -44,8 +44,8 @@ struct SubCommandCleanUp {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// debug-depth
-#[argh(subcommand, name = "debug-depth")]
-struct SubCommandDepth {}
+#[argh(subcommand, name = "debug-stats")]
+struct SubCommandStats {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// bench-zip
@@ -80,8 +80,8 @@ fn main() -> std::io::Result<()> {
         MySubCommandEnum::CleanUp(_cmd) => {
             increstore::cleanup()?;
         }
-        MySubCommandEnum::Depth(_cmd) => {
-            increstore::debug_depth()?;
+        MySubCommandEnum::Stats(_cmd) => {
+            increstore::debug_stats()?;
         }
     }
 
