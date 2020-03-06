@@ -52,7 +52,7 @@ create table if not exists blobs (
     Ok(())
 }
 
-pub fn get(content_hash: &str) -> Result<Vec<Blob>> {
+pub fn by_content_hash(content_hash: &str) -> Result<Vec<Blob>> {
     let conn = Connection::open(dbpath())?;
 
     let mut stmt = conn.prepare(

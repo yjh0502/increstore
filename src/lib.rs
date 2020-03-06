@@ -109,7 +109,7 @@ fn append_zip_full(input_filepath: &str) -> io::Result<db::Blob> {
 }
 
 fn cleanup(hash: &str) -> std::io::Result<()> {
-    let blobs = db::get(hash).expect("db::get");
+    let blobs = db::by_content_hash(hash).expect("db::get");
 
     let blob_has_backref = blobs.iter().find(|b| b.parent_hash.is_some()).is_some();
 
