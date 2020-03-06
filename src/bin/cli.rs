@@ -12,6 +12,7 @@ struct TopLevel {
 enum MySubCommandEnum {
     Push(SubCommandPush),
     Get(SubCommandGet),
+    CleanUp(SubCommandCleanUp),
     BenchZip(SubCommandBenchZip),
 }
 
@@ -24,7 +25,7 @@ struct SubCommandPush {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// push
+/// get
 #[argh(subcommand, name = "get")]
 struct SubCommandGet {
     #[argh(positional)]
@@ -33,6 +34,11 @@ struct SubCommandGet {
     #[argh(positional)]
     out_filename: String,
 }
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// cleanup
+#[argh(subcommand, name = "cleanup")]
+struct SubCommandCleanUp {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// bench-zip
@@ -59,6 +65,9 @@ fn main() -> std::io::Result<()> {
         }
         MySubCommandEnum::Get(cmd) => {
             increstore::get(&cmd.filename, &cmd.out_filename)?;
+        }
+        MySubCommandEnum::CleanUp(_cmd) => {
+            increstore::cleanup()?;
         }
         MySubCommandEnum::BenchZip(cmd) => {
             increstore::bench_zip(&cmd.filename, cmd.parallel)?;

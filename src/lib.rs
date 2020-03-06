@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate log;
 
+use rayon::prelude::*;
 use std::io;
 use std::path::*;
 use stopwatch::Stopwatch;
@@ -12,6 +13,11 @@ mod hashrw;
 pub mod zip;
 
 use crate::zip::store_zip;
+use db::Blob;
+
+pub fn max_root_blobs() -> usize {
+    5
+}
 
 pub fn prefix() -> &'static str {
     "data"
@@ -28,7 +34,7 @@ fn filepath(s: &str) -> PathBuf {
     format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..]).into()
 }
 
-fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> std::io::Result<()>
+fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> io::Result<()>
 where
     P: AsRef<Path>,
 {
@@ -47,29 +53,23 @@ where
     Ok(())
 }
 
-fn update_blob(tmp_path: NamedTempFile, blob: &db::Blob) -> std::io::Result<()> {
+fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> io::Result<()> {
     let path = filepath(&blob.store_hash);
 
     trace!("path={:?}", path);
     store_object(tmp_path, &path)?;
 
+    // TODO: update id
     db::insert(blob).expect("failed to insert blob");
     Ok(())
 }
 
-pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
-    match db::latest() {
-        Ok(latest) => {
-            append_zip_delta(input_filepath, &latest)?;
-        }
-        Err(_e) => {
-            append_zip_full(input_filepath)?;
-        }
-    };
+pub fn push_zip(input_filepath: &str) -> io::Result<()> {
+    append_zip(input_filepath)?;
     Ok(())
 }
 
-pub fn get(filename: &str, out_filename: &str) -> std::io::Result<()> {
+pub fn get(filename: &str, out_filename: &str) -> io::Result<()> {
     let mut blobs = db::by_filename(filename).expect("db::by_filename");
     if blobs.is_empty() {
         panic!("unknown filename: {}", filename);
@@ -98,7 +98,7 @@ pub fn get(filename: &str, out_filename: &str) -> std::io::Result<()> {
     for delta_blob in decode_path {
         let delta_filepath = filepath(&delta_blob.store_hash);
         debug!("decode filename={}", delta_blob.filename);
-        debug!("src={:?}, input={:?}", src_filepath, delta_filepath);
+        debug!("trace={:?}, input={:?}", src_filepath, delta_filepath);
         let (_input_meta, _dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
             delta::delta(
@@ -121,41 +121,43 @@ pub fn get(filename: &str, out_filename: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn append_zip_full(input_filepath: &str) -> io::Result<db::Blob> {
-    trace!("append_zip_full: input_filepath={}", input_filepath);
+pub fn cleanup() -> io::Result<()> {
+    let roots = db::roots().expect("db::roots");
+    let mut root_candidates = Vec::new();
 
-    let blob = store_zip_blob(input_filepath)?;
-    db::insert(&blob).expect("failed to insert blob");
-    Ok(blob)
-}
-
-fn cleanup(hash: &str) -> std::io::Result<()> {
-    let blobs = db::by_content_hash(hash).expect("db::get");
-
-    let blob_has_backref = blobs.iter().find(|b| b.parent_hash.is_some()).is_some();
-
-    if !blob_has_backref {
-        // block does not have backref: root block
-        return Ok(());
+    for root_blob in roots {
+        let blobs = db::by_content_hash(&root_blob.content_hash).expect("db::get");
+        if let Some(backref) = blobs.into_iter().find(|b| b.parent_hash.is_some()) {
+            root_candidates.push((root_blob, backref));
+        }
     }
 
-    for blob in blobs {
-        match blob.parent_hash {
-            Some(ref parent_hash) => {
-                cleanup(parent_hash)?;
-            }
-            None => {
-                // non-root full blob, delete
-                db::remove(&blob).expect("db::remove");
-                std::fs::remove_file(&filepath(&blob.content_hash))?;
-            }
+    root_candidates.sort_by_key(|(_root_blob, backref)| {
+        //
+        10000 - backref.store_size * 10000 / backref.content_size
+    });
+
+    {
+        let mut s = String::new();
+        for (_root, backref) in &root_candidates {
+            s += &format!(
+                "{}={:.02}% ",
+                backref.id,
+                backref.compression_ratio() * 100.0
+            );
         }
+        debug!("root compression ratio: {}", s);
+    }
+
+    for (root, _backref) in root_candidates.into_iter().skip(max_root_blobs()) {
+        db::remove(&root).expect("db::remove");
+        std::fs::remove_file(&filepath(&root.content_hash))?;
     }
 
     Ok(())
 }
 
-fn store_zip_blob(input_filepath: &str) -> std::io::Result<db::Blob> {
+fn store_zip_blob(input_filepath: &str) -> io::Result<Blob> {
     let input_filename = Path::new(&input_filepath)
         .file_name()
         .unwrap()
@@ -173,23 +175,22 @@ fn store_zip_blob(input_filepath: &str) -> std::io::Result<db::Blob> {
     Ok(input_blob)
 }
 
-fn append_zip_delta(input_filepath: &str, parent: &db::Blob) -> std::io::Result<()> {
-    debug!(
-        "append_zip_delta: input_filepath={}, parent={}",
-        input_filepath, parent.filename
-    );
+fn append_zip_full(input_filepath: &str) -> io::Result<Blob> {
+    trace!("append_zip_full: input_filepath={}", input_filepath);
 
-    let sw = Stopwatch::start_new();
-    let input_blob = append_zip_full(input_filepath)?;
-    let input_filepath = filepath(&input_blob.store_hash);
-    let dt_store_zip = sw.elapsed_ms();
+    let blob = store_zip_blob(input_filepath)?;
+    db::insert(&blob).expect("failed to insert blob");
+    Ok(blob)
+}
 
+fn append_zip_delta(input_blob: &Blob, src_blob: &Blob) -> io::Result<Blob> {
     let sw = Stopwatch::start_new();
+    let input_filepath = filepath(&input_blob.content_hash);
     let blob = {
         let tmp_dir = tmpdir();
         let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
 
-        let src_hash = &parent.content_hash;
+        let src_hash = &src_blob.content_hash;
         let src_filepath = filepath(src_hash);
 
         let (_input_meta, dst_meta) = async_std::task::block_on(async {
@@ -219,20 +220,54 @@ fn append_zip_delta(input_filepath: &str, parent: &db::Blob) -> std::io::Result<
     let dt_store_delta = sw.elapsed_ms();
 
     info!(
-        "append_zip_delta: ratio={:.02}% dt_store_zip={}ms, dt_store_delta={}ms",
+        "append_zip_delta: ratio={:.02}%, dt_store_delta={}ms",
         blob.compression_ratio() * 100.0,
-        dt_store_zip,
         dt_store_delta,
     );
+    Ok(blob)
+}
 
-    if let Some(ref src_hash) = blob.parent_hash {
-        cleanup(src_hash)?;
+fn ratio_summary(blobs: &[Blob]) -> String {
+    let mut s = String::new();
+    for blob in blobs {
+        s += &format!("{}={:.02}% ", blob.id, blob.compression_ratio() * 100.0);
     }
+    s
+}
+
+fn append_zip(input_filepath: &str) -> io::Result<()> {
+    debug!("append_zip: input_filepath={}", input_filepath);
+
+    let root_blobs = db::roots().expect("db::roots");
+
+    let sw = Stopwatch::start_new();
+    let input_blob = append_zip_full(input_filepath)?;
+    info!("append_zip: dt_store_zip={}ms", sw.elapsed_ms(),);
+
+    if root_blobs.is_empty() {
+        return Ok(());
+    }
+
+    let mut link_blobs = root_blobs
+        .into_par_iter()
+        .map(|root_blob| append_zip_delta(&input_blob, &root_blob))
+        .collect::<io::Result<Vec<_>>>()?;
+
+    link_blobs.sort_by_key(|blob| blob.store_size);
+
+    debug!("compression ratio: {}", ratio_summary(&link_blobs));
+
+    for blob in link_blobs.into_iter().skip(1) {
+        db::remove(&blob).expect("db::remove");
+        std::fs::remove_file(&filepath(&blob.store_hash))?;
+    }
+
+    cleanup()?;
 
     Ok(())
 }
 
-pub fn bench_zip(input_filepath: &str, parallel: bool) -> std::io::Result<()> {
+pub fn bench_zip(input_filepath: &str, parallel: bool) -> io::Result<()> {
     let tmp_dir = tmpdir();
     let tempfile = NamedTempFile::new_in(&tmp_dir)?;
 
