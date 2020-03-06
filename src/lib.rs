@@ -2,7 +2,7 @@
 extern crate log;
 
 use std::io;
-use std::path::Path;
+use std::path::*;
 use stopwatch::Stopwatch;
 use tempfile::*;
 
@@ -11,15 +11,21 @@ mod delta;
 mod hashrw;
 pub mod zip;
 
-use crate::delta::store_delta;
 use crate::zip::store_zip;
 
 pub fn prefix() -> &'static str {
     "data"
 }
 
-fn filepath(s: &str) -> String {
-    format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..])
+pub fn tmpdir() -> String {
+    let tmp_dir = format!("{}/tmp", prefix());
+    //TODO
+    std::fs::create_dir_all(&tmp_dir).ok();
+    tmp_dir
+}
+
+fn filepath(s: &str) -> PathBuf {
+    format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..]).into()
 }
 
 fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> std::io::Result<()>
@@ -44,7 +50,7 @@ where
 fn update_blob(tmp_path: NamedTempFile, blob: &db::Blob) -> std::io::Result<()> {
     let path = filepath(&blob.store_hash);
 
-    trace!("path={}", path);
+    trace!("path={:?}", path);
     store_object(tmp_path, &path)?;
 
     db::insert(blob).expect("failed to insert blob");
@@ -63,7 +69,7 @@ pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn get(filename: &str, _out_filename: &str) -> std::io::Result<()> {
+pub fn get(filename: &str, out_filename: &str) -> std::io::Result<()> {
     let mut blobs = db::by_filename(filename).expect("db::by_filename");
     if blobs.is_empty() {
         panic!("unknown filename: {}", filename);
@@ -79,12 +85,38 @@ pub fn get(filename: &str, _out_filename: &str) -> std::io::Result<()> {
         let old_blob = std::mem::replace(&mut blob, blobs.pop().unwrap());
         decode_path.push(old_blob);
     }
-    decode_path.push(blob);
 
     decode_path.reverse();
-    for blob in decode_path {
-        debug!("{}", blob.filename);
+
+    assert!(blob.parent_hash.is_none());
+
+    let tmp_dir = tmpdir();
+    let mut old_tmpfile = NamedTempFile::new_in(&tmp_dir)?;
+    let mut tmpfile = NamedTempFile::new_in(&tmp_dir)?;
+
+    let mut src_filepath = filepath(&blob.content_hash);
+    for delta_blob in decode_path {
+        let delta_filepath = filepath(&delta_blob.store_hash);
+        debug!("decode filename={}", delta_blob.filename);
+        debug!("src={:?}, input={:?}", src_filepath, delta_filepath);
+        let (_input_meta, _dst_meta) = async_std::task::block_on(async {
+            let src_file = async_std::fs::File::open(&src_filepath).await?;
+            delta::delta(
+                delta::ProcessMode::Decode,
+                &src_file,
+                &delta_filepath,
+                &tmpfile.path(),
+            )
+            .await
+        })?;
+
+        assert_eq!(delta_blob.content_hash, _dst_meta.digest());
+        std::mem::swap(&mut tmpfile, &mut old_tmpfile);
+        src_filepath = old_tmpfile.path().to_path_buf();
     }
+
+    // result: tmpfile
+    tmpfile.persist(out_filename)?;
 
     Ok(())
 }
@@ -130,9 +162,7 @@ fn store_zip_blob(input_filepath: &str) -> std::io::Result<db::Blob> {
         .to_str()
         .unwrap();
 
-    let tmp_dir = format!("{}/tmp", prefix());
-    std::fs::create_dir_all(&tmp_dir)?;
-
+    let tmp_dir = tmpdir();
     let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
 
     let meta = store_zip(input_filepath, tmp_unzip_path.path(), true)?;
@@ -143,10 +173,10 @@ fn store_zip_blob(input_filepath: &str) -> std::io::Result<db::Blob> {
     Ok(input_blob)
 }
 
-fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<()> {
+fn append_zip_delta(input_filepath: &str, parent: &db::Blob) -> std::io::Result<()> {
     debug!(
-        "append_zip_delta: input_filepath={}, latest={}",
-        input_filepath, latest.filename
+        "append_zip_delta: input_filepath={}, parent={}",
+        input_filepath, parent.filename
     );
 
     let sw = Stopwatch::start_new();
@@ -156,17 +186,21 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
 
     let sw = Stopwatch::start_new();
     let blob = {
-        let tmp_dir = format!("{}/tmp", prefix());
-        std::fs::create_dir_all(&tmp_dir)?;
-
+        let tmp_dir = tmpdir();
         let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
 
-        let src_hash = &latest.content_hash;
+        let src_hash = &parent.content_hash;
         let src_filepath = filepath(src_hash);
 
         let (_input_meta, dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
-            store_delta(src_file, &input_filepath, &tmp_path).await
+            delta::delta(
+                delta::ProcessMode::Encode,
+                src_file,
+                &input_filepath,
+                &tmp_path,
+            )
+            .await
         })?;
 
         let mut blob = dst_meta.blob(&input_blob.filename);
@@ -199,9 +233,7 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
 }
 
 pub fn bench_zip(input_filepath: &str, parallel: bool) -> std::io::Result<()> {
-    let tmp_dir = format!("{}/tmp", prefix());
-    std::fs::create_dir_all(&tmp_dir)?;
-
+    let tmp_dir = tmpdir();
     let tempfile = NamedTempFile::new_in(&tmp_dir)?;
 
     let ws = Stopwatch::start_new();

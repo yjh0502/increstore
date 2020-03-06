@@ -1,7 +1,10 @@
 use crate::hashrw::*;
 use std::path::Path;
 
-pub async fn store_delta<R, P1, P2>(
+pub use xdelta3::stream::ProcessMode;
+
+pub async fn delta<R, P1, P2>(
+    op: xdelta3::stream::ProcessMode,
     src_reader: R,
     input_path: P1,
     dst_path: P2,
@@ -25,13 +28,13 @@ where
         .level(0);
     xdelta3::stream::process_async(
         cfg,
-        xdelta3::stream::ProcessMode::Encode,
+        op,
         io::BufReader::new(&mut input_file),
         src_reader,
         io::BufWriter::new(&mut dst_file),
     )
     .await
-    .expect("failed to encode");
+    .expect("failed to encode/decode");
 
     let input_meta = input_file.meta();
     let dst_meta = dst_file.meta();
