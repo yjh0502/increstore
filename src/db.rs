@@ -52,10 +52,10 @@ create table if not exists blobs (
     Ok(())
 }
 
-pub fn get(content_hash: &str) -> Result<Blob> {
+pub fn get(content_hash: &str) -> Result<Vec<Blob>> {
     let conn = Connection::open(dbpath())?;
 
-    conn.query_row(
+    let mut stmt = conn.prepare(
         r#"
 select
     id, filename, time_created,
@@ -63,9 +63,13 @@ select
 from blobs
 where content_hash = ?
 "#,
-        params![content_hash],
-        decode_row,
-    )
+    )?;
+
+    let mut rows = Vec::new();
+    for row_res in stmt.query_map(params![content_hash], decode_row)? {
+        rows.push(row_res?);
+    }
+    Ok(rows)
 }
 
 fn decode_row(row: &rusqlite::Row) -> Result<Blob> {
@@ -126,5 +130,17 @@ insert into blobs (
         ],
     )?;
 
+    Ok(())
+}
+
+pub fn remove(blob: &Blob) -> Result<()> {
+    let conn = Connection::open(dbpath())?;
+
+    conn.execute(
+        r#"
+delete from blobs where store_hash = ?1
+"#,
+        params![blob.store_hash],
+    )?;
     Ok(())
 }

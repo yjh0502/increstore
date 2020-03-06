@@ -90,33 +90,43 @@ fn update_blob(tmp_path: NamedTempFile, blob: &db::Blob) -> std::io::Result<()> 
 
 pub fn push_zip(input_filepath: &str) -> std::io::Result<()> {
     match db::latest() {
-        Ok(latest) => append_zip_delta(input_filepath, &latest),
-        Err(_e) => append_zip_full(input_filepath),
-    }
+        Ok(latest) => {
+            append_zip_delta(input_filepath, &latest)?;
+        }
+        Err(_e) => {
+            append_zip_full(input_filepath)?;
+        }
+    };
+    Ok(())
 }
 
-fn append_zip_full(input_filepath: &str) -> io::Result<()> {
+fn append_zip_full(input_filepath: &str) -> io::Result<db::Blob> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
     let blob = store_zip_blob(input_filepath)?;
     db::insert(&blob).expect("failed to insert blob");
-    Ok(())
+    Ok(blob)
 }
 
 fn cleanup(hash: &str) -> std::io::Result<()> {
-    let mut blob = db::get(hash).expect("db::get");
+    let blobs = db::get(hash).expect("db::get");
 
-    while let Some(parent_hash) = &blob.parent_hash {
-        match std::fs::remove_file(&filepath(&blob.content_hash)) {
-            Ok(()) => {
-                debug!(
-                    "cleanup: filename={}, content_hash={}",
-                    blob.filename, blob.content_hash
-                );
-                blob = db::get(parent_hash).expect("db::get");
+    let blob_has_backref = blobs.iter().find(|b| b.parent_hash.is_some()).is_some();
+
+    if !blob_has_backref {
+        // block does not have backref: root block
+        return Ok(());
+    }
+
+    for blob in blobs {
+        match blob.parent_hash {
+            Some(ref parent_hash) => {
+                cleanup(parent_hash)?;
             }
-            Err(_e) => {
-                break;
+            None => {
+                // non-root full blob, delete
+                db::remove(&blob).expect("db::remove");
+                std::fs::remove_file(&filepath(&blob.content_hash))?;
             }
         }
     }
@@ -151,7 +161,7 @@ fn append_zip_delta(input_filepath: &str, latest: &db::Blob) -> std::io::Result<
     );
 
     let sw = Stopwatch::start_new();
-    let input_blob = store_zip_blob(input_filepath)?;
+    let input_blob = append_zip_full(input_filepath)?;
     let input_filepath = filepath(&input_blob.store_hash);
     let dt_store_zip = sw.elapsed_ms();
 
