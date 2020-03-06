@@ -278,3 +278,70 @@ pub fn bench_zip(input_filepath: &str, parallel: bool) -> io::Result<()> {
     info!("store_zip took {}ms", ws.elapsed_ms());
     Ok(())
 }
+
+pub fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [usize]) -> usize {
+    let blob = &blobs[idx];
+
+    match blob.parent_hash {
+        None => {
+            depths[idx] = 1;
+            1
+        }
+        Some(ref parent_hash) => {
+            let mut min_depth = blobs.len();
+
+            for (parent_idx, parent) in blobs.iter().enumerate() {
+                if parent_idx == idx {
+                    continue;
+                }
+                if &parent.content_hash != parent_hash {
+                    continue;
+                }
+
+                let depth = if depths[parent_idx] == 0 {
+                    calculate_depth(parent_idx, blobs, depths)
+                } else {
+                    depths[parent_idx]
+                };
+                if depth < min_depth {
+                    min_depth = depth;
+                }
+            }
+            trace!("{}={}", idx, min_depth + 1);
+            depths[idx] = min_depth + 1;
+            min_depth
+        }
+    }
+}
+
+pub fn debug_depth() -> io::Result<()> {
+    let blobs = db::all().expect("db::all");
+
+    let mut depths = Vec::with_capacity(blobs.len());
+    depths.resize(blobs.len(), 0);
+
+    for i in 0..blobs.len() {
+        calculate_depth(i, &blobs, &mut depths);
+    }
+
+    let bucket_size = (blobs.len().next_power_of_two().trailing_zeros() as usize) + 1;
+    let mut bucket = Vec::with_capacity(bucket_size);
+    bucket.resize(bucket_size, 0);
+
+    for i in 0..blobs.len() {
+        let depth = depths[i];
+        let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
+        bucket[bucket_idx] += 1;
+    }
+
+    for (i, count) in bucket.into_iter().enumerate() {
+        let (start, end) = if i == 0 {
+            (0, 1)
+        } else {
+            (1 << (i - 1), (1 << i) - 1)
+        };
+        println!("{:3}~{:3} = {}", start, end, count);
+    }
+
+    Ok(())
+}

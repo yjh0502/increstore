@@ -52,6 +52,25 @@ create table if not exists blobs (
     Ok(())
 }
 
+pub fn all() -> Result<Vec<Blob>> {
+    let conn = Connection::open(dbpath())?;
+
+    let mut stmt = conn.prepare(
+        r#"
+select
+    id, filename, time_created,
+    store_size, content_size, store_hash, content_hash, parent_hash
+from blobs
+"#,
+    )?;
+
+    let mut rows = Vec::new();
+    for row_res in stmt.query_map(params![], decode_row)? {
+        rows.push(row_res?);
+    }
+    Ok(rows)
+}
+
 pub fn by_filename(filename: &str) -> Result<Vec<Blob>> {
     let conn = Connection::open(dbpath())?;
 

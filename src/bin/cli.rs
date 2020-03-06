@@ -12,8 +12,10 @@ struct TopLevel {
 enum MySubCommandEnum {
     Push(SubCommandPush),
     Get(SubCommandGet),
-    CleanUp(SubCommandCleanUp),
     BenchZip(SubCommandBenchZip),
+
+    CleanUp(SubCommandCleanUp),
+    Depth(SubCommandDepth),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -37,8 +39,13 @@ struct SubCommandGet {
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// cleanup
-#[argh(subcommand, name = "cleanup")]
+#[argh(subcommand, name = "debug-cleanup")]
 struct SubCommandCleanUp {}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// debug-depth
+#[argh(subcommand, name = "debug-depth")]
+struct SubCommandDepth {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// bench-zip
@@ -66,11 +73,15 @@ fn main() -> std::io::Result<()> {
         MySubCommandEnum::Get(cmd) => {
             increstore::get(&cmd.filename, &cmd.out_filename)?;
         }
+        MySubCommandEnum::BenchZip(cmd) => {
+            increstore::bench_zip(&cmd.filename, cmd.parallel)?;
+        }
+
         MySubCommandEnum::CleanUp(_cmd) => {
             increstore::cleanup()?;
         }
-        MySubCommandEnum::BenchZip(cmd) => {
-            increstore::bench_zip(&cmd.filename, cmd.parallel)?;
+        MySubCommandEnum::Depth(_cmd) => {
+            increstore::debug_depth()?;
         }
     }
 
