@@ -16,14 +16,15 @@ pub struct Stats {
     non_root_content_size: u64,
 
     // depths
-    depths: Vec<GraphNode>,
+    pub blobs: Vec<Blob>,
+    pub depths: Vec<GraphNode>,
 }
 
 impl Stats {
-    pub fn from_blobs(blobs: &[Blob]) -> Self {
+    pub fn from_blobs(blobs: Vec<Blob>) -> Self {
         let mut stats = Stats::default();
 
-        for blob in blobs {
+        for blob in &blobs {
             stats.add_blob(blob);
         }
 
@@ -34,6 +35,7 @@ impl Stats {
             calculate_depth(i, &blobs, &mut stats.depths);
         }
 
+        stats.blobs = blobs;
         stats
     }
 
@@ -51,66 +53,165 @@ impl Stats {
         }
     }
 
+    /// heuristic cost saving of the blob
+    /// criteria 1: estimated space saving from root blob: store_size * children_count
+    /// criteria 2: blob diversity
+    pub fn root_score(&self, root_idx: usize) -> u64 {
+        let mut aliases = self.aliases(root_idx);
+        match aliases.pop() {
+            None => u64::max_value(),
+            Some(alias) => {
+                return alias.store_size;
+                /*
+                let len = self.children(root_idx).len();
+                let multiplier = (len as f32).sqrt().ceil() as u64 + 1;
+                return alias.store_size * multiplier;
+                let saving_score = (alias.content_size - alias.store_size) * multiplier as u64;
+
+                // TODO: eval?
+                let diversity_score = alias.store_size * 100;
+
+                saving_score + diversity_score
+                */
+            }
+        }
+    }
+
+    /// TODO: fix name
+    pub fn aliases(&self, idx: usize) -> Vec<&Blob> {
+        let blob0 = &self.blobs[idx];
+        let mut aliases = Vec::new();
+        for blob in self.blobs.iter() {
+            if blob.store_hash == blob0.store_hash {
+                continue;
+            }
+            if blob.content_hash == blob0.content_hash {
+                aliases.push(blob);
+            }
+        }
+        aliases
+    }
+
+    fn children(&self, idx: usize) -> Vec<&Blob> {
+        let mut children = Vec::new();
+
+        for (child_idx, child) in self.blobs.iter().enumerate() {
+            if Some(idx) != self.depths[child_idx].parent_idx {
+                continue;
+            }
+
+            // excludes children with full blob alias
+            let aliases = self.aliases(child_idx);
+            if aliases.iter().find(|blob| blob.is_root()).is_some() {
+                continue;
+            }
+
+            children.push(child);
+        }
+        children
+    }
+
     pub fn size_info(&self) -> String {
         use bytesize::ByteSize;
         use std::fmt::Write;
 
         let mut s = String::new();
-        writeln!(
-            s,
-            "total count={}, size={}",
-            self.root_count + self.non_root_count,
-            ByteSize(self.root_total_size + self.non_root_store_size)
-        )
-        .ok();
 
-        writeln!(
-            s,
-            "root count={}, size={}, avg={}",
-            self.root_count,
-            ByteSize(self.root_total_size),
-            ByteSize(self.root_total_size / self.root_count as u64)
-        )
-        .ok();
+        // stats
+        {
+            writeln!(s, "## stats").ok();
+            writeln!(
+                s,
+                "total count={}, size={}",
+                self.root_count + self.non_root_count,
+                ByteSize(self.root_total_size + self.non_root_store_size)
+            )
+            .ok();
 
-        let compression_ratio =
-            (self.non_root_store_size as f32) * 100.0 / (self.non_root_content_size as f32);
+            writeln!(
+                s,
+                "root count={}, size={}, avg={}",
+                self.root_count,
+                ByteSize(self.root_total_size),
+                ByteSize(self.root_total_size / self.root_count as u64)
+            )
+            .ok();
 
-        writeln!(
-            s,
-            "non_root count={}, store_size={}, content_size={}, compression={:.2}% ({:.2}x)",
-            self.non_root_count,
-            ByteSize(self.non_root_store_size),
-            ByteSize(self.non_root_content_size),
-            compression_ratio,
-            100.0 / compression_ratio
-        )
-        .ok();
+            let compression_ratio =
+                (self.non_root_store_size as f32) * 100.0 / (self.non_root_content_size as f32);
 
-        let len = self.depths.len();
-
-        let bucket_size = (len.next_power_of_two().trailing_zeros() as usize) + 1;
-        let mut bucket = Vec::with_capacity(bucket_size);
-        bucket.resize(bucket_size, 0);
-
-        for i in 0..len {
-            let depth = self.depths[i].depth;
-            let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
-            bucket[bucket_idx] += 1;
+            writeln!(
+                s,
+                "non_root count={}, store_size={}, content_size={}, compression={:.2}% ({:.2}x)",
+                self.non_root_count,
+                ByteSize(self.non_root_store_size),
+                ByteSize(self.non_root_content_size),
+                compression_ratio,
+                100.0 / compression_ratio
+            )
+            .ok();
         }
 
-        while let Some(0) = bucket.last().clone() {
-            bucket.pop();
+        // root blobs
+        {
+            writeln!(s, "## root blobs").ok();
+            for (idx, blob) in self.blobs.iter().enumerate() {
+                if blob.is_root() {
+                    let mut aliases = self.aliases(idx);
+                    match aliases.pop() {
+                        None => {
+                            writeln!(
+                                s,
+                                "  blob idx={} content_size={} genesis",
+                                idx,
+                                ByteSize(blob.content_size)
+                            )
+                            .ok();
+                        }
+                        Some(alias) => {
+                            writeln!(
+                                s,
+                                "  blob idx={} content_size={} ratio={:.2} child_count={} score={}",
+                                idx,
+                                ByteSize(blob.content_size),
+                                alias.compression_ratio(),
+                                self.children(idx).len(),
+                                ByteSize(self.root_score(idx))
+                            )
+                            .ok();
+                        }
+                    }
+                }
+            }
         }
 
-        writeln!(s, "## depth destribution").ok();
-        for (i, count) in bucket.into_iter().enumerate() {
-            let (start, end) = if i == 0 {
-                (0, 0)
-            } else {
-                (1 << (i - 1), (1 << i) - 1)
-            };
-            writeln!(s, "{:3}~{:3} = {}", start, end, count).ok();
+        // depth
+        {
+            let len = self.depths.len();
+
+            let bucket_size = (len.next_power_of_two().trailing_zeros() as usize) + 1;
+            let mut bucket = Vec::with_capacity(bucket_size);
+            bucket.resize(bucket_size, 0);
+
+            for i in 0..len {
+                let depth = self.depths[i].depth;
+                let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
+                bucket[bucket_idx] += 1;
+            }
+
+            while let Some(0) = bucket.last().clone() {
+                bucket.pop();
+            }
+
+            writeln!(s, "## depth destribution").ok();
+            for (i, count) in bucket.into_iter().enumerate() {
+                let (start, end) = if i == 0 {
+                    (0, 0)
+                } else {
+                    (1 << (i - 1), (1 << i) - 1)
+                };
+                writeln!(s, "{:3}~{:3} = {}", start, end, count).ok();
+            }
         }
 
         s

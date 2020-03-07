@@ -13,8 +13,6 @@ where
     R2: async_std::io::Read + std::marker::Unpin,
     W: async_std::io::Write + std::marker::Unpin,
 {
-    use async_std::io;
-
     let mut input_reader = HashRW::new(input_reader);
     let mut dst = HashRW::new(dst);
 
@@ -22,15 +20,7 @@ where
         .source_window_size(100_000_000)
         .no_compress(true)
         .level(0);
-    xdelta3::stream::process_async(
-        cfg,
-        op,
-        &mut input_reader,
-        src_reader,
-        io::BufWriter::new(&mut dst),
-    )
-    .await
-    .expect("failed to encode/decode");
+    xdelta3::stream::process_async(cfg, op, &mut input_reader, src_reader, &mut dst).await?;
 
     let input_meta = input_reader.meta();
     let dst_meta = dst.meta();

@@ -15,6 +15,7 @@ pub mod zip;
 
 use crate::zip::store_zip;
 use db::Blob;
+use hashrw::*;
 use stats::Stats;
 
 pub fn max_root_blobs() -> usize {
@@ -125,29 +126,47 @@ pub fn get(filename: &str, out_filename: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn cleanup() -> io::Result<()> {
-    let roots = db::roots().expect("db::roots");
-    let mut root_candidates = Vec::new();
+struct RootBlob<'a> {
+    blob: &'a Blob,
+    alias: &'a Blob,
+    score: u64,
+}
 
-    for root_blob in roots {
-        let blobs = db::by_content_hash(&root_blob.content_hash).expect("db::get");
-        if let Some(backref) = blobs.into_iter().find(|b| b.parent_hash.is_some()) {
-            root_candidates.push((root_blob, backref));
+pub fn cleanup() -> io::Result<()> {
+    let blobs = db::all().expect("db::all");
+    let stats = Stats::from_blobs(blobs);
+
+    let mut root_candidates = Vec::new();
+    for (root_idx, root_blob) in stats.blobs.iter().enumerate() {
+        if root_blob.parent_hash.is_some() {
+            continue;
+        }
+
+        let mut aliases = stats.aliases(root_idx);
+        if let Some(alias) = aliases.pop() {
+            let score = stats.root_score(root_idx);
+            root_candidates.push(RootBlob {
+                blob: root_blob,
+                alias,
+                score,
+            });
         }
     }
 
-    root_candidates.sort_by_key(|(_root_blob, backref)| {
-        //
-        10000 - backref.store_size * 10000 / backref.content_size
+    root_candidates.sort_by_key(|blob| {
+        // sort by score desc
+        u64::max_value() - blob.score
     });
 
     {
         let mut s = String::new();
-        for (_root, backref) in &root_candidates {
+        for root_blob in &root_candidates {
+            let alias = root_blob.alias;
             s += &format!(
-                "{}={:.02}% ",
-                backref.id,
-                backref.compression_ratio() * 100.0
+                "{}={:.02}%,{} ",
+                alias.id,
+                alias.compression_ratio() * 100.0,
+                bytesize::ByteSize(root_blob.score),
             );
         }
         debug!("root compression ratio: {}", s);
@@ -155,7 +174,8 @@ pub fn cleanup() -> io::Result<()> {
 
     // TODO: store distances
 
-    for (root, _backref) in root_candidates.into_iter().skip(max_root_blobs()) {
+    for root_blob in root_candidates.into_iter().skip(max_root_blobs()) {
+        let root = root_blob.blob;
         db::remove(&root).expect("db::remove");
         std::fs::remove_file(&filepath(&root.content_hash))?;
     }
@@ -189,7 +209,13 @@ fn append_zip_full(input_filepath: &str) -> io::Result<Blob> {
     Ok(blob)
 }
 
-fn append_zip_delta(input_blob: &Blob, src_blob: &Blob) -> io::Result<Blob> {
+use std::sync::{atomic::AtomicUsize, Arc};
+
+fn append_zip_delta(
+    input_blob: &Blob,
+    src_blob: &Blob,
+    race: Arc<AtomicUsize>,
+) -> io::Result<Option<Blob>> {
     let sw = Stopwatch::start_new();
     let input_filepath = filepath(&input_blob.content_hash);
     let blob = {
@@ -199,13 +225,27 @@ fn append_zip_delta(input_blob: &Blob, src_blob: &Blob) -> io::Result<Blob> {
         let src_hash = &src_blob.content_hash;
         let src_filepath = filepath(src_hash);
 
-        let (_input_meta, dst_meta) = async_std::task::block_on(async {
+        let res = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
             let input_file = async_std::fs::File::open(&input_filepath).await?;
             let dst_file = async_std::fs::File::create(tmp_path.path()).await?;
 
-            delta::delta(delta::ProcessMode::Encode, src_file, input_file, dst_file).await
-        })?;
+            let race = RaceWrite::new(dst_file, race);
+
+            delta::delta(delta::ProcessMode::Encode, src_file, input_file, race).await
+        });
+
+        let (_input_meta, dst_meta) = match res {
+            Ok(s) => s,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::TimedOut {
+                    // timeout from race
+                    return Ok(None);
+                } else {
+                    return Err(e);
+                }
+            }
+        };
 
         let mut blob = dst_meta.blob(&input_blob.filename);
         blob.content_size = input_blob.content_size;
@@ -227,7 +267,7 @@ fn append_zip_delta(input_blob: &Blob, src_blob: &Blob) -> io::Result<Blob> {
         blob.compression_ratio() * 100.0,
         dt_store_delta,
     );
-    Ok(blob)
+    Ok(Some(blob))
 }
 
 fn ratio_summary(blobs: &[Blob]) -> String {
@@ -251,10 +291,14 @@ fn append_zip(input_filepath: &str) -> io::Result<()> {
         return Ok(());
     }
 
-    let mut link_blobs = root_blobs
+    let race = Arc::new(AtomicUsize::new(0));
+
+    let link_blobs = root_blobs
         .into_par_iter()
-        .map(|root_blob| append_zip_delta(&input_blob, &root_blob))
+        .map(|root_blob| append_zip_delta(&input_blob, &root_blob, race.clone()))
         .collect::<io::Result<Vec<_>>>()?;
+
+    let mut link_blobs = link_blobs.into_iter().filter_map(|v| v).collect::<Vec<_>>();
 
     link_blobs.sort_by_key(|blob| blob.store_size);
 
@@ -283,7 +327,7 @@ pub fn bench_zip(input_filepath: &str, parallel: bool) -> io::Result<()> {
 pub fn debug_stats() -> io::Result<()> {
     let blobs = db::all().expect("db::all");
 
-    let stats = Stats::from_blobs(&blobs);
+    let stats = Stats::from_blobs(blobs);
     info!("info\n{}", stats.size_info());
 
     Ok(())

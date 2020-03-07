@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Blob {
     pub id: u32,
     pub filename: String,
@@ -17,6 +17,9 @@ pub struct Blob {
 impl Blob {
     pub fn compression_ratio(&self) -> f32 {
         self.store_size as f32 / self.content_size as f32
+    }
+    pub fn is_root(&self) -> bool {
+        self.parent_hash.is_none()
     }
 }
 

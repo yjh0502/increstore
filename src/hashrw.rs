@@ -152,3 +152,74 @@ where
         }
     }
 }
+
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
+pub struct RaceWrite<W> {
+    race: Arc<AtomicUsize>,
+    size: usize,
+    w: W,
+}
+
+impl<W> RaceWrite<W> {
+    pub fn new(w: W, race: Arc<AtomicUsize>) -> Self {
+        Self { race, size: 0, w }
+    }
+}
+
+impl<W> Drop for RaceWrite<W> {
+    fn drop(&mut self) {
+        let mut value = self.race.load(Ordering::SeqCst);
+        while value < self.size {
+            self.race
+                .compare_and_swap(value, self.size, Ordering::SeqCst);
+            value = self.race.load(Ordering::SeqCst);
+        }
+    }
+}
+
+impl<W> async_std::io::Write for RaceWrite<W>
+where
+    W: async_std::io::Write + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        ctx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let mut s = self.as_mut();
+        let w = Pin::new(&mut s.w);
+        match ready!(w.poll_write(ctx, buf)) {
+            Ok(n) => {
+                s.size += n;
+                let race_size = s.race.load(Ordering::SeqCst);
+                if race_size == 0 || race_size <= s.size / 2 {
+                    Poll::Ready(Ok(n))
+                } else {
+                    Poll::Ready(Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "race",
+                    )))
+                }
+            }
+            Err(e) => Poll::Ready(Err(e)),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
+        let mut s = self.as_mut();
+        let w = Pin::new(&mut s.w);
+        w.poll_flush(ctx)
+    }
+
+    fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
+        let mut s = self.as_mut();
+        s.race.store(s.size, Ordering::SeqCst);
+
+        let w = Pin::new(&mut s.w);
+        w.poll_close(ctx)
+    }
+}
