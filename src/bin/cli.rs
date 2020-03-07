@@ -16,6 +16,7 @@ enum MySubCommandEnum {
 
     CleanUp(SubCommandCleanUp),
     Stats(SubCommandStats),
+    Graph(SubCommandGraph),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -38,6 +39,16 @@ struct SubCommandGet {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
+/// bench-zip
+#[argh(subcommand, name = "bench-zip")]
+struct SubCommandBenchZip {
+    #[argh(description = "parallel", switch, short = 'p')]
+    parallel: bool,
+    #[argh(positional)]
+    filename: String,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
 /// cleanup
 #[argh(subcommand, name = "debug-cleanup")]
 struct SubCommandCleanUp {}
@@ -48,11 +59,9 @@ struct SubCommandCleanUp {}
 struct SubCommandStats {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// bench-zip
-#[argh(subcommand, name = "bench-zip")]
-struct SubCommandBenchZip {
-    #[argh(description = "parallel", switch, short = 'p')]
-    parallel: bool,
+/// debug-graph
+#[argh(subcommand, name = "debug-graph")]
+struct SubCommandGraph {
     #[argh(positional)]
     filename: String,
 }
@@ -82,6 +91,9 @@ fn main() -> std::io::Result<()> {
         }
         MySubCommandEnum::Stats(_cmd) => {
             increstore::debug_stats()?;
+        }
+        MySubCommandEnum::Graph(cmd) => {
+            increstore::debug_graph(&cmd.filename)?;
         }
     }
 

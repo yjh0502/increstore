@@ -144,7 +144,8 @@ pub fn cleanup() -> io::Result<()> {
         }
 
         let mut aliases = stats.aliases(root_idx);
-        if let Some(alias) = aliases.pop() {
+        if let Some(alias_idx) = aliases.pop() {
+            let alias = &stats.blobs[alias_idx];
             let score = stats.root_score(root_idx);
             root_candidates.push(RootBlob {
                 blob: root_blob,
@@ -330,6 +331,60 @@ pub fn debug_stats() -> io::Result<()> {
 
     let stats = Stats::from_blobs(blobs);
     println!("info\n{}", stats.size_info());
+
+    Ok(())
+}
+
+pub fn debug_graph(filename: &str) -> io::Result<()> {
+    use std::fmt::Write;
+
+    let blobs = db::all().expect("db::all");
+    let stats = Stats::from_blobs(blobs);
+
+    let mut s = String::new();
+    writeln!(s, "digraph increstore {{").ok();
+
+    for (idx, blob) in stats.blobs.iter().enumerate() {
+        if blob.is_root() {
+            continue;
+        }
+
+        let name = stats.node_name(idx);
+        let label = format!("{}\\n{}", name, bytesize::ByteSize(blob.store_size));
+        writeln!(s, "  {} [label=\"{}\"];", name, label).ok();
+    }
+
+    let mut root_names = String::new();
+    for (idx, blob) in stats.blobs.iter().enumerate() {
+        if blob.is_root() {
+            write!(root_names, " {}", stats.node_name(idx)).ok();
+        }
+    }
+    writeln!(
+        s,
+        "  node [style=filled fillcolor=red shape=doublecircle];{};",
+        root_names
+    )
+    .ok();
+    writeln!(s, "  node [style=\"\" shape=circle];").ok();
+
+    for (idx, _blob) in stats.blobs.iter().enumerate() {
+        let node = &stats.depths[idx];
+        if let Some(parent_idx) = node.parent_idx {
+            writeln!(
+                s,
+                "  {} -> {};",
+                stats.node_name(idx),
+                stats.node_name(parent_idx)
+            )
+            .ok();
+            //
+        }
+    }
+
+    writeln!(s, "}}").ok();
+
+    std::fs::write(filename, s)?;
 
     Ok(())
 }

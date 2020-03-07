@@ -60,7 +60,8 @@ impl Stats {
         let mut aliases = self.aliases(root_idx);
         match aliases.pop() {
             None => u64::max_value(),
-            Some(alias) => {
+            Some(alias_idx) => {
+                let alias = &self.blobs[alias_idx];
                 return alias.store_size;
                 /*
                 let len = self.children(root_idx).len();
@@ -78,18 +79,31 @@ impl Stats {
     }
 
     /// TODO: fix name
-    pub fn aliases(&self, idx: usize) -> Vec<&Blob> {
+    pub fn aliases(&self, idx: usize) -> Vec<usize> {
         let blob0 = &self.blobs[idx];
         let mut aliases = Vec::new();
-        for blob in self.blobs.iter() {
+        for (blob_idx, blob) in self.blobs.iter().enumerate() {
             if blob.store_hash == blob0.store_hash {
                 continue;
             }
             if blob.content_hash == blob0.content_hash {
-                aliases.push(blob);
+                aliases.push(blob_idx);
             }
         }
         aliases
+    }
+
+    /// TODO: for graphviz
+    pub fn node_name(&self, idx: usize) -> String {
+        let aliases = self.aliases(idx);
+        for blob_idx in aliases {
+            let blob = &self.blobs[blob_idx];
+            if blob.is_root() {
+                return format!("B{}", blob_idx);
+            }
+        }
+        //
+        format!("B{}", idx)
     }
 
     fn children(&self, idx: usize) -> Vec<&Blob> {
@@ -102,7 +116,11 @@ impl Stats {
 
             // excludes children with full blob alias
             let aliases = self.aliases(child_idx);
-            if aliases.iter().find(|blob| blob.is_root()).is_some() {
+            if aliases
+                .into_iter()
+                .find(|idx| self.blobs[*idx].is_root())
+                .is_some()
+            {
                 continue;
             }
 
@@ -169,13 +187,13 @@ impl Stats {
                             )
                             .ok();
                         }
-                        Some(alias) => {
+                        Some(alias_idx) => {
                             writeln!(
                                 s,
                                 "  blob idx={} content_size={} ratio={:.2} child_count={} score={}",
                                 idx,
                                 ByteSize(blob.content_size),
-                                alias.compression_ratio(),
+                                self.blobs[alias_idx].compression_ratio(),
                                 self.children(idx).len(),
                                 ByteSize(self.root_score(idx))
                             )
