@@ -1,26 +1,22 @@
 use crate::hashrw::*;
-use std::path::Path;
 
 pub use xdelta3::stream::ProcessMode;
 
-pub async fn delta<R, P1, P2>(
+pub async fn delta<R1, R2, W>(
     op: xdelta3::stream::ProcessMode,
-    src_reader: R,
-    input_path: P1,
-    dst_path: P2,
+    src_reader: R1,
+    input_reader: R2,
+    dst: W,
 ) -> std::io::Result<(WriteMetadata, WriteMetadata)>
 where
-    R: async_std::io::Read + std::marker::Unpin,
-    P1: AsRef<Path>,
-    P2: AsRef<Path>,
+    R1: async_std::io::Read + std::marker::Unpin,
+    R2: async_std::io::Read + std::marker::Unpin,
+    W: async_std::io::Write + std::marker::Unpin,
 {
-    use async_std::{fs, io};
+    use async_std::io;
 
-    let input_file = fs::File::open(input_path.as_ref()).await?;
-    let dst_file = fs::File::create(dst_path.as_ref()).await?;
-
-    let mut input_file = HashRW::new(input_file);
-    let mut dst_file = HashRW::new(dst_file);
+    let mut input_reader = HashRW::new(input_reader);
+    let mut dst = HashRW::new(dst);
 
     let cfg = xdelta3::stream::Xd3Config::new()
         .source_window_size(100_000_000)
@@ -29,15 +25,15 @@ where
     xdelta3::stream::process_async(
         cfg,
         op,
-        io::BufReader::new(&mut input_file),
+        &mut input_reader,
         src_reader,
-        io::BufWriter::new(&mut dst_file),
+        io::BufWriter::new(&mut dst),
     )
     .await
     .expect("failed to encode/decode");
 
-    let input_meta = input_file.meta();
-    let dst_meta = dst_file.meta();
+    let input_meta = input_reader.meta();
+    let dst_meta = dst.meta();
 
     Ok((input_meta, dst_meta))
 }

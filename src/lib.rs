@@ -101,11 +101,13 @@ pub fn get(filename: &str, out_filename: &str) -> io::Result<()> {
         debug!("trace={:?}, input={:?}", src_filepath, delta_filepath);
         let (_input_meta, _dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
+            let input_file = async_std::fs::File::open(&delta_filepath).await?;
+            let dst_file = async_std::fs::File::create(tmpfile.path()).await?;
             delta::delta(
                 delta::ProcessMode::Decode,
                 &src_file,
-                &delta_filepath,
-                &tmpfile.path(),
+                &input_file,
+                &dst_file,
             )
             .await
         })?;
@@ -197,13 +199,10 @@ fn append_zip_delta(input_blob: &Blob, src_blob: &Blob) -> io::Result<Blob> {
 
         let (_input_meta, dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
-            delta::delta(
-                delta::ProcessMode::Encode,
-                src_file,
-                &input_filepath,
-                &tmp_path,
-            )
-            .await
+            let input_file = async_std::fs::File::open(&input_filepath).await?;
+            let dst_file = async_std::fs::File::create(tmp_path.path()).await?;
+
+            delta::delta(delta::ProcessMode::Encode, src_file, input_file, dst_file).await
         })?;
 
         let mut blob = dst_meta.blob(&input_blob.filename);
