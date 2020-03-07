@@ -391,7 +391,7 @@ pub fn debug_stats() -> io::Result<()> {
         println!("## depth destribution");
         for (i, count) in bucket.into_iter().enumerate() {
             let (start, end) = if i == 0 {
-                (0, 1)
+                (0, 0)
             } else {
                 (1 << (i - 1), (1 << i) - 1)
             };
