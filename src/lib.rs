@@ -286,6 +286,9 @@ struct Stats {
     non_root_count: usize,
     non_root_store_size: u64,
     non_root_content_size: u64,
+
+    // depths
+    depths: Vec<usize>,
 }
 
 impl Stats {
@@ -295,6 +298,14 @@ impl Stats {
         for blob in blobs {
             stats.add_blob(blob);
         }
+
+        stats.depths = Vec::with_capacity(blobs.len());
+        stats.depths.resize(blobs.len(), 0);
+
+        for i in 0..blobs.len() {
+            calculate_depth(i, &blobs, &mut stats.depths);
+        }
+
         stats
     }
 
@@ -348,6 +359,32 @@ impl Stats {
         )
         .ok();
 
+        let len = self.depths.len();
+
+        let bucket_size = (len.next_power_of_two().trailing_zeros() as usize) + 1;
+        let mut bucket = Vec::with_capacity(bucket_size);
+        bucket.resize(bucket_size, 0);
+
+        for i in 0..len {
+            let depth = self.depths[i];
+            let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
+            bucket[bucket_idx] += 1;
+        }
+
+        while let Some(0) = bucket.last().clone() {
+            bucket.pop();
+        }
+
+        writeln!(s, "## depth destribution").ok();
+        for (i, count) in bucket.into_iter().enumerate() {
+            let (start, end) = if i == 0 {
+                (0, 0)
+            } else {
+                (1 << (i - 1), (1 << i) - 1)
+            };
+            writeln!(s, "{:3}~{:3} = {}", start, end, count).ok();
+        }
+
         s
     }
 }
@@ -390,44 +427,8 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [usize]) -> usize {
 pub fn debug_stats() -> io::Result<()> {
     let blobs = db::all().expect("db::all");
 
-    {
-        let mut stats = Stats::from_blobs(&blobs);
-
-        info!("{}", stats.size_info());
-    }
-
-    {
-        let mut depths = Vec::with_capacity(blobs.len());
-        depths.resize(blobs.len(), 0);
-
-        for i in 0..blobs.len() {
-            calculate_depth(i, &blobs, &mut depths);
-        }
-
-        let bucket_size = (blobs.len().next_power_of_two().trailing_zeros() as usize) + 1;
-        let mut bucket = Vec::with_capacity(bucket_size);
-        bucket.resize(bucket_size, 0);
-
-        for i in 0..blobs.len() {
-            let depth = depths[i];
-            let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
-            bucket[bucket_idx] += 1;
-        }
-
-        while let Some(0) = bucket.last().clone() {
-            bucket.pop();
-        }
-
-        println!("## depth destribution");
-        for (i, count) in bucket.into_iter().enumerate() {
-            let (start, end) = if i == 0 {
-                (0, 0)
-            } else {
-                (1 << (i - 1), (1 << i) - 1)
-            };
-            println!("{:3}~{:3} = {}", start, end, count);
-        }
-    }
+    let stats = Stats::from_blobs(&blobs);
+    info!("info\n{}", stats.size_info());
 
     Ok(())
 }
