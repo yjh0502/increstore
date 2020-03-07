@@ -1,6 +1,12 @@
 use crate::db::Blob;
 
 #[derive(Default)]
+pub struct GraphNode {
+    pub depth: usize,
+    pub parent_idx: Option<usize>,
+}
+
+#[derive(Default)]
 pub struct Stats {
     root_count: usize,
     root_total_size: u64,
@@ -10,7 +16,7 @@ pub struct Stats {
     non_root_content_size: u64,
 
     // depths
-    depths: Vec<usize>,
+    depths: Vec<GraphNode>,
 }
 
 impl Stats {
@@ -22,7 +28,7 @@ impl Stats {
         }
 
         stats.depths = Vec::with_capacity(blobs.len());
-        stats.depths.resize(blobs.len(), 0);
+        stats.depths.resize_with(blobs.len(), Default::default);
 
         for i in 0..blobs.len() {
             calculate_depth(i, &blobs, &mut stats.depths);
@@ -88,7 +94,7 @@ impl Stats {
         bucket.resize(bucket_size, 0);
 
         for i in 0..len {
-            let depth = self.depths[i];
+            let depth = self.depths[i].depth;
             let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
             bucket[bucket_idx] += 1;
         }
@@ -111,16 +117,20 @@ impl Stats {
     }
 }
 
-fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [usize]) -> usize {
+fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
     let blob = &blobs[idx];
 
     match blob.parent_hash {
         None => {
-            depths[idx] = 1;
-            1
+            depths[idx] = GraphNode {
+                depth: 1,
+                parent_idx: None,
+            };
         }
+
         Some(ref parent_hash) => {
             let mut min_depth = blobs.len();
+            let mut min_idx = 0;
 
             for (parent_idx, parent) in blobs.iter().enumerate() {
                 if parent_idx == idx {
@@ -130,18 +140,21 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [usize]) -> usize {
                     continue;
                 }
 
-                let depth = if depths[parent_idx] == 0 {
+                if depths[parent_idx].depth == 0 {
                     calculate_depth(parent_idx, blobs, depths)
-                } else {
-                    depths[parent_idx]
-                };
+                }
+                let depth = depths[parent_idx].depth;
                 if depth < min_depth {
                     min_depth = depth;
+                    min_idx = parent_idx;
                 }
             }
+
             trace!("{}={}", idx, min_depth + 1);
-            depths[idx] = min_depth + 1;
-            min_depth
+            depths[idx] = GraphNode {
+                depth: min_depth + 1,
+                parent_idx: Some(min_idx),
+            };
         }
     }
 }
