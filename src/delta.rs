@@ -1,4 +1,4 @@
-use crate::hashrw::*;
+use crate::rw::*;
 
 pub use xdelta3::stream::ProcessMode;
 

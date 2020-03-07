@@ -6,7 +6,7 @@ use futures::lock::*;
 use futures::prelude::*;
 use pbr::ProgressBar;
 
-use crate::hashrw::*;
+use crate::rw::*;
 
 struct TarEntry {
     header: tar::Header,

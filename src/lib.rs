@@ -9,13 +9,13 @@ use tempfile::*;
 
 pub mod db;
 mod delta;
-mod hashrw;
+mod rw;
 mod stats;
 pub mod zip;
 
 use crate::zip::store_zip;
 use db::Blob;
-use hashrw::*;
+use rw::*;
 use stats::Stats;
 
 pub fn max_root_blobs() -> usize {
