@@ -122,7 +122,7 @@ impl Stats {
             writeln!(s, "## stats").ok();
             writeln!(
                 s,
-                "total count={}, size={}",
+                "  total count={}, size={}",
                 self.root_count + self.non_root_count,
                 ByteSize(self.root_total_size + self.non_root_store_size)
             )
@@ -130,7 +130,7 @@ impl Stats {
 
             writeln!(
                 s,
-                "root count={}, size={}, avg={}",
+                "  root count={}, size={}, avg={}",
                 self.root_count,
                 ByteSize(self.root_total_size),
                 ByteSize(self.root_total_size / self.root_count as u64)
@@ -142,10 +142,11 @@ impl Stats {
 
             writeln!(
                 s,
-                "non_root count={}, store_size={}, content_size={}, compression={:.2}% ({:.2}x)",
+                "  non_root count={}, store_size={}, content_size={}, avg={}, compression={:.2}% ({:.2}x)",
                 self.non_root_count,
                 ByteSize(self.non_root_store_size),
                 ByteSize(self.non_root_content_size),
+                ByteSize(self.non_root_store_size / self.non_root_count as u64),
                 compression_ratio,
                 100.0 / compression_ratio
             )
@@ -203,7 +204,7 @@ impl Stats {
                 bucket.pop();
             }
 
-            writeln!(s, "## depth destribution").ok();
+            writeln!(s, "## depth ditribution").ok();
             for (i, count) in bucket.into_iter().enumerate() {
                 let (start, end) = if i == 0 {
                     (0, 0)
