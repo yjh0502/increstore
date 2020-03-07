@@ -17,13 +17,14 @@ use crate::zip::store_zip;
 use db::Blob;
 use rw::*;
 use stats::Stats;
+use std::env;
 
 pub fn max_root_blobs() -> usize {
     5
 }
 
-pub fn prefix() -> &'static str {
-    "data"
+pub fn prefix() -> String {
+    env::var("WORKDIR").unwrap_or("data".to_owned())
 }
 
 pub fn tmpdir() -> String {

@@ -1,3 +1,4 @@
+use crate::prefix;
 use rusqlite::{params, Connection, Result};
 
 #[derive(Debug, Clone)]
@@ -23,8 +24,8 @@ impl Blob {
     }
 }
 
-fn dbpath() -> &'static str {
-    "data/meta.db"
+fn dbpath() -> String {
+    format!("{}/meta.db", prefix())
 }
 
 pub fn prepare() -> Result<()> {
