@@ -329,7 +329,7 @@ pub fn debug_stats() -> io::Result<()> {
     let blobs = db::all().expect("db::all");
 
     let stats = Stats::from_blobs(blobs);
-    info!("info\n{}", stats.size_info());
+    println!("info\n{}", stats.size_info());
 
     Ok(())
 }
