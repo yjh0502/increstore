@@ -211,11 +211,11 @@ impl Stats {
                         Some(alias_idx) => {
                             writeln!(
                                 s,
-                                "  blob idx={} age={} content_size={} ratio={:.2} child_count={} score={}",
+                                "  blob idx={} age={} content_size={} ratio={:.2}% child_count={} score={}",
                                 idx,
                                 self.root_age(idx),
                                 ByteSize(blob.content_size),
-                                self.blobs[alias_idx].compression_ratio(),
+                                self.blobs[alias_idx].compression_ratio()*100.0,
                                 self.children(idx).len(),
                                 ByteSize(self.root_score(idx))
                             )
