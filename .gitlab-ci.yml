@@ -17,10 +17,6 @@ test:
   script:
     - rustc --version
     - cargo --version
-
-build:
-  stage: bulid
-  script:
     - cargo build --release
 
 cache:
