@@ -54,6 +54,17 @@ impl Stats {
         }
     }
 
+    fn root_age(&self, root_idx: usize) -> usize {
+        let max_idx = self.blobs.len();
+        let last_idx = self
+            .children(root_idx)
+            .into_iter()
+            .max()
+            .unwrap_or(root_idx);
+
+        max_idx - last_idx
+    }
+
     /// heuristic cost saving of the blob
     /// criteria 1: estimated space saving from root blob: store_size * children_count
     /// criteria 2: blob diversity
@@ -63,7 +74,11 @@ impl Stats {
             None => u64::max_value(),
             Some(alias_idx) => {
                 let alias = &self.blobs[alias_idx];
-                return alias.store_size;
+
+                let max_unused_age = 50;
+                let age = (self.root_age(root_idx) as u64).min(max_unused_age);
+
+                return alias.store_size * (max_unused_age - age) / max_unused_age;
                 /*
                 let len = self.children(root_idx).len();
                 let multiplier = (len as f32).sqrt().ceil() as u64 + 1;
@@ -107,10 +122,10 @@ impl Stats {
         format!("B{}", idx)
     }
 
-    fn children(&self, idx: usize) -> Vec<&Blob> {
+    fn children(&self, idx: usize) -> Vec<usize> {
         let mut children = Vec::new();
 
-        for (child_idx, child) in self.blobs.iter().enumerate() {
+        for (child_idx, _child) in self.blobs.iter().enumerate() {
             if Some(idx) != self.depths[child_idx].parent_idx {
                 continue;
             }
@@ -125,7 +140,7 @@ impl Stats {
                 continue;
             }
 
-            children.push(child);
+            children.push(child_idx);
         }
         children
     }
@@ -191,8 +206,9 @@ impl Stats {
                         Some(alias_idx) => {
                             writeln!(
                                 s,
-                                "  blob idx={} content_size={} ratio={:.2} child_count={} score={}",
+                                "  blob idx={} age={} content_size={} ratio={:.2} child_count={} score={}",
                                 idx,
+                                self.root_age(idx),
                                 ByteSize(blob.content_size),
                                 self.blobs[alias_idx].compression_ratio(),
                                 self.children(idx).len(),
