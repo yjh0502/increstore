@@ -4,6 +4,7 @@ use log::*;
 #[derive(Default)]
 pub struct GraphNode {
     pub depth: usize,
+    pub child_count: usize,
     pub parent_idx: Option<usize>,
 }
 
@@ -34,6 +35,10 @@ impl Stats {
 
         for i in 0..blobs.len() {
             calculate_depth(i, &blobs, &mut stats.depths);
+        }
+
+        for i in 0..blobs.len() {
+            add_child_count(i, &mut stats.depths);
         }
 
         stats.blobs = blobs;
@@ -75,7 +80,7 @@ impl Stats {
             Some(alias_idx) => {
                 let alias = &self.blobs[alias_idx];
 
-                let max_unused_age = 50;
+                let max_unused_age = 100;
                 let age = (self.root_age(root_idx) as u64).min(max_unused_age);
 
                 return alias.store_size * (max_unused_age - age) / max_unused_age;
@@ -122,7 +127,7 @@ impl Stats {
         format!("B{}", idx)
     }
 
-    fn children(&self, idx: usize) -> Vec<usize> {
+    pub fn children(&self, idx: usize) -> Vec<usize> {
         let mut children = Vec::new();
 
         for (child_idx, _child) in self.blobs.iter().enumerate() {
@@ -254,6 +259,13 @@ impl Stats {
     }
 }
 
+fn add_child_count(idx: usize, depths: &mut [GraphNode]) {
+    depths[idx].child_count += 1;
+    if let Some(parent_idx) = depths[idx].parent_idx {
+        add_child_count(parent_idx, depths);
+    }
+}
+
 fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
     let blob = &blobs[idx];
 
@@ -261,6 +273,7 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
         None => {
             depths[idx] = GraphNode {
                 depth: 1,
+                child_count: 0,
                 parent_idx: None,
             };
         }
@@ -290,6 +303,7 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
             trace!("{}={}", idx, min_depth + 1);
             depths[idx] = GraphNode {
                 depth: min_depth + 1,
+                child_count: 0,
                 parent_idx: Some(min_idx),
             };
         }

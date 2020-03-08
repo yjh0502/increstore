@@ -395,6 +395,30 @@ pub fn debug_graph(filename: &str) -> Result<()> {
         .ok();
     }
 
+    {
+        let mut spline_idx = 0;
+        let mut spline = stats.node_name(spline_idx);
+        loop {
+            let children = stats.children(spline_idx);
+            if children.is_empty() {
+                break;
+            }
+
+            let mut max_child_count = 0;
+            let mut max_child_idx = 0;
+            for child_idx in children {
+                let child_count = stats.depths[child_idx].child_count;
+                if child_count > max_child_count {
+                    max_child_count = child_count;
+                    max_child_idx = child_idx;
+                }
+            }
+            write!(spline, "->{}", stats.node_name(max_child_idx)).ok();
+            spline_idx = max_child_idx;
+        }
+        write!(s, "  {} [style=invis weight=100]", spline).ok();
+    }
+
     for (idx, _blob) in stats.blobs.iter().enumerate() {
         let node = &stats.depths[idx];
         if let Some(parent_idx) = node.parent_idx {
