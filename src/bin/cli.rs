@@ -70,7 +70,7 @@ struct SubCommandGraph {
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// debug-list-files
-#[argh(subcommand, name = "debug-list-files")]
+#[argh(subcommand, name = "debug-ls-files")]
 struct SubCommandListFiles {
     #[argh(description = "roots", switch)]
     roots: bool,
