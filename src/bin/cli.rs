@@ -71,7 +71,12 @@ struct SubCommandGraph {
 #[derive(FromArgs, PartialEq, Debug)]
 /// debug-list-files
 #[argh(subcommand, name = "debug-list-files")]
-struct SubCommandListFiles {}
+struct SubCommandListFiles {
+    #[argh(description = "roots", switch)]
+    roots: bool,
+    #[argh(description = "non-roots", switch)]
+    non_roots: bool,
+}
 
 fn main() -> Result<()> {
     env_logger::init();
@@ -102,8 +107,8 @@ fn main() -> Result<()> {
         MySubCommandEnum::Graph(cmd) => {
             debug_graph(&cmd.filename)?;
         }
-        MySubCommandEnum::ListFiles(_cmd) => {
-            debug_list_files()?;
+        MySubCommandEnum::ListFiles(cmd) => {
+            debug_list_files(cmd.roots, cmd.non_roots)?;
         }
     }
 

@@ -401,6 +401,13 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn debug_list_files() -> Result<()> {
+pub fn debug_list_files(roots: bool, non_roots: bool) -> Result<()> {
+    let blobs = db::all()?;
+    for blob in blobs {
+        if (roots && blob.is_root()) || (non_roots && !blob.is_root()) {
+            println!("{:?}", filepath(&blob.store_hash));
+        }
+    }
+
     Ok(())
 }
