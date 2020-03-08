@@ -196,7 +196,7 @@ where
             Ok(n) => {
                 s.size += n;
                 let race_size = s.race.load(Ordering::SeqCst);
-                if race_size == 0 || race_size <= s.size / 2 {
+                if race_size == 0 || race_size > s.size {
                     Poll::Ready(Ok(n))
                 } else {
                     // TODO: use signal channel other than io::Error?
