@@ -80,11 +80,6 @@ fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<()> {
     Ok(())
 }
 
-pub fn push_zip(input_filepath: &str) -> Result<()> {
-    append_zip(input_filepath)?;
-    Ok(())
-}
-
 pub fn get(filename: &str, out_filename: &str) -> Result<()> {
     let mut blobs = db::by_filename(filename)?;
     if blobs.is_empty() {
@@ -304,7 +299,7 @@ fn ratio_summary(blobs: &[Blob]) -> String {
     s
 }
 
-fn append_zip(input_filepath: &str) -> Result<()> {
+pub fn push_zip(input_filepath: &str) -> Result<()> {
     debug!("append_zip: input_filepath={}", input_filepath);
 
     let root_blobs = db::roots()?;
