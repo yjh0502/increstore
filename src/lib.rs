@@ -5,6 +5,7 @@ use log::*;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
 use tempfile::*;
+use thiserror::Error;
 
 pub mod db;
 mod delta;
@@ -18,7 +19,17 @@ use rw::*;
 use stats::Stats;
 use std::env;
 
-pub enum Error {}
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Rsqlite(#[from] rusqlite::Error),
+    #[error(transparent)]
+    TempFilePersist(#[from] tempfile::PersistError),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 pub fn max_root_blobs() -> usize {
     5
@@ -39,7 +50,7 @@ fn filepath(s: &str) -> PathBuf {
     format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..]).into()
 }
 
-fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> io::Result<()>
+fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> Result<()>
 where
     P: AsRef<Path>,
 {
@@ -58,24 +69,24 @@ where
     Ok(())
 }
 
-fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> io::Result<()> {
+fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<()> {
     let path = filepath(&blob.store_hash);
 
     trace!("path={:?}", path);
     store_object(tmp_path, &path)?;
 
     // TODO: update id
-    db::insert(blob).expect("failed to insert blob");
+    db::insert(blob)?;
     Ok(())
 }
 
-pub fn push_zip(input_filepath: &str) -> io::Result<()> {
+pub fn push_zip(input_filepath: &str) -> Result<()> {
     append_zip(input_filepath)?;
     Ok(())
 }
 
-pub fn get(filename: &str, out_filename: &str) -> io::Result<()> {
-    let mut blobs = db::by_filename(filename).expect("db::by_filename");
+pub fn get(filename: &str, out_filename: &str) -> Result<()> {
+    let mut blobs = db::by_filename(filename)?;
     if blobs.is_empty() {
         panic!("unknown filename: {}", filename);
     }
@@ -84,7 +95,7 @@ pub fn get(filename: &str, out_filename: &str) -> io::Result<()> {
 
     let mut blob = blobs.pop().unwrap();
     while let Some(parent_hash) = &blob.parent_hash {
-        let mut blobs = db::by_content_hash(parent_hash).expect("db::by_content_hash");
+        let mut blobs = db::by_content_hash(parent_hash)?;
         assert!(!blobs.is_empty());
 
         let old_blob = std::mem::replace(&mut blob, blobs.pop().unwrap());
@@ -134,8 +145,8 @@ struct RootBlob<'a> {
     score: u64,
 }
 
-pub fn cleanup() -> io::Result<()> {
-    let blobs = db::all().expect("db::all");
+pub fn cleanup() -> Result<()> {
+    let blobs = db::all()?;
     let stats = Stats::from_blobs(blobs);
 
     let mut root_candidates = Vec::new();
@@ -179,14 +190,14 @@ pub fn cleanup() -> io::Result<()> {
 
     for root_blob in root_candidates.into_iter().skip(max_root_blobs()) {
         let root = root_blob.blob;
-        db::remove(&root).expect("db::remove");
+        db::remove(&root)?;
         std::fs::remove_file(&filepath(&root.content_hash))?;
     }
 
     Ok(())
 }
 
-fn store_zip_blob(input_filepath: &str) -> io::Result<Blob> {
+fn store_zip_blob(input_filepath: &str) -> Result<Blob> {
     let input_filename = Path::new(&input_filepath)
         .file_name()
         .unwrap()
@@ -204,11 +215,11 @@ fn store_zip_blob(input_filepath: &str) -> io::Result<Blob> {
     Ok(input_blob)
 }
 
-fn append_zip_full(input_filepath: &str) -> io::Result<Blob> {
+fn append_zip_full(input_filepath: &str) -> Result<Blob> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
     let blob = store_zip_blob(input_filepath)?;
-    db::insert(&blob).expect("failed to insert blob");
+    db::insert(&blob)?;
     Ok(blob)
 }
 
@@ -218,7 +229,7 @@ fn append_zip_delta(
     input_blob: &Blob,
     src_blob: &Blob,
     race: Arc<AtomicUsize>,
-) -> io::Result<Option<Blob>> {
+) -> Result<Option<Blob>> {
     let sw = Stopwatch::start_new();
     let input_filepath = filepath(&input_blob.content_hash);
     let blob = {
@@ -245,7 +256,7 @@ fn append_zip_delta(
                     // timeout from race
                     return Ok(None);
                 } else {
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
         };
@@ -281,10 +292,10 @@ fn ratio_summary(blobs: &[Blob]) -> String {
     s
 }
 
-fn append_zip(input_filepath: &str) -> io::Result<()> {
+fn append_zip(input_filepath: &str) -> Result<()> {
     debug!("append_zip: input_filepath={}", input_filepath);
 
-    let root_blobs = db::roots().expect("db::roots");
+    let root_blobs = db::roots()?;
 
     let sw = Stopwatch::start_new();
     let input_blob = append_zip_full(input_filepath)?;
@@ -299,7 +310,7 @@ fn append_zip(input_filepath: &str) -> io::Result<()> {
     let link_blobs = root_blobs
         .into_par_iter()
         .map(|root_blob| append_zip_delta(&input_blob, &root_blob, race.clone()))
-        .collect::<io::Result<Vec<_>>>()?;
+        .collect::<Result<Vec<_>>>()?;
 
     let mut link_blobs = link_blobs.into_iter().filter_map(|v| v).collect::<Vec<_>>();
 
@@ -308,7 +319,7 @@ fn append_zip(input_filepath: &str) -> io::Result<()> {
     debug!("compression ratio: {}", ratio_summary(&link_blobs));
 
     for blob in link_blobs.into_iter().skip(1) {
-        db::remove(&blob).expect("db::remove");
+        db::remove(&blob)?;
         std::fs::remove_file(&filepath(&blob.store_hash))?;
     }
 
@@ -317,7 +328,7 @@ fn append_zip(input_filepath: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn bench_zip(input_filepath: &str, parallel: bool) -> io::Result<()> {
+pub fn bench_zip(input_filepath: &str, parallel: bool) -> Result<()> {
     let tmp_dir = tmpdir();
     let tempfile = NamedTempFile::new_in(&tmp_dir)?;
 
@@ -327,8 +338,8 @@ pub fn bench_zip(input_filepath: &str, parallel: bool) -> io::Result<()> {
     Ok(())
 }
 
-pub fn debug_stats() -> io::Result<()> {
-    let blobs = db::all().expect("db::all");
+pub fn debug_stats() -> Result<()> {
+    let blobs = db::all()?;
 
     let stats = Stats::from_blobs(blobs);
     println!("info\n{}", stats.size_info());
@@ -336,10 +347,10 @@ pub fn debug_stats() -> io::Result<()> {
     Ok(())
 }
 
-pub fn debug_graph(filename: &str) -> io::Result<()> {
+pub fn debug_graph(filename: &str) -> Result<()> {
     use std::fmt::Write;
 
-    let blobs = db::all().expect("db::all");
+    let blobs = db::all()?;
     let stats = Stats::from_blobs(blobs);
 
     let mut s = String::new();
@@ -390,6 +401,6 @@ pub fn debug_graph(filename: &str) -> io::Result<()> {
     Ok(())
 }
 
-pub fn debug_list_files() -> io::Result<()> {
+pub fn debug_list_files() -> Result<()> {
     Ok(())
 }

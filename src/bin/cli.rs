@@ -1,4 +1,5 @@
 use argh::FromArgs;
+use increstore::*;
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// Top-level command.
@@ -17,6 +18,7 @@ enum MySubCommandEnum {
     CleanUp(SubCommandCleanUp),
     Stats(SubCommandStats),
     Graph(SubCommandGraph),
+    ListFiles(SubCommandListFiles),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -66,34 +68,42 @@ struct SubCommandGraph {
     filename: String,
 }
 
-fn main() -> std::io::Result<()> {
+#[derive(FromArgs, PartialEq, Debug)]
+/// debug-list-files
+#[argh(subcommand, name = "debug-list-files")]
+struct SubCommandListFiles {}
+
+fn main() -> Result<()> {
     env_logger::init();
 
-    std::fs::create_dir_all(increstore::prefix()).expect("failed to create dir");
+    std::fs::create_dir_all(prefix()).expect("failed to create dir");
 
-    increstore::db::prepare().expect("failed to prepare");
+    db::prepare().expect("failed to prepare");
 
     let up: TopLevel = argh::from_env();
 
     match up.nested {
         MySubCommandEnum::Push(cmd) => {
-            increstore::push_zip(&cmd.filename)?;
+            push_zip(&cmd.filename)?;
         }
         MySubCommandEnum::Get(cmd) => {
-            increstore::get(&cmd.filename, &cmd.out_filename)?;
+            get(&cmd.filename, &cmd.out_filename)?;
         }
         MySubCommandEnum::BenchZip(cmd) => {
-            increstore::bench_zip(&cmd.filename, cmd.parallel)?;
+            bench_zip(&cmd.filename, cmd.parallel)?;
         }
 
         MySubCommandEnum::CleanUp(_cmd) => {
-            increstore::cleanup()?;
+            cleanup()?;
         }
         MySubCommandEnum::Stats(_cmd) => {
-            increstore::debug_stats()?;
+            debug_stats()?;
         }
         MySubCommandEnum::Graph(cmd) => {
-            increstore::debug_graph(&cmd.filename)?;
+            debug_graph(&cmd.filename)?;
+        }
+        MySubCommandEnum::ListFiles(_cmd) => {
+            debug_list_files()?;
         }
     }
 

@@ -199,10 +199,8 @@ where
                 if race_size == 0 || race_size <= s.size / 2 {
                     Poll::Ready(Ok(n))
                 } else {
-                    Poll::Ready(Err(std::io::Error::new(
-                        std::io::ErrorKind::TimedOut,
-                        "race",
-                    )))
+                    // TODO: use signal channel other than io::Error?
+                    Poll::Ready(Err(io::Error::new(io::ErrorKind::TimedOut, "race")))
                 }
             }
             Err(e) => Poll::Ready(Err(e)),

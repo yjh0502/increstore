@@ -2,6 +2,7 @@ use crate::rw::*;
 
 pub use xdelta3::stream::ProcessMode;
 
+/// uses std::io::Result to trigger TimedOut
 pub async fn delta<R1, R2, W>(
     op: xdelta3::stream::ProcessMode,
     src_reader: R1,
