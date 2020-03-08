@@ -364,28 +364,19 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     writeln!(s, "digraph increstore {{").ok();
 
     for (idx, blob) in stats.blobs.iter().enumerate() {
-        if blob.is_root() {
-            continue;
-        }
-
         let name = stats.node_name(idx);
         let label = format!("{}\\n{}", name, bytesize::ByteSize(blob.store_size));
-        writeln!(s, "  {} [label=\"{}\"];", name, label).ok();
-    }
-
-    let mut root_names = String::new();
-    for (idx, blob) in stats.blobs.iter().enumerate() {
         if blob.is_root() {
-            write!(root_names, " {}", stats.node_name(idx)).ok();
+            writeln!(
+                s,
+                "  {} [label=\"{}\" style=filled fillcolor=red shape=doublecircle];",
+                name, label
+            )
+            .ok();
+        } else {
+            writeln!(s, "  {} [label=\"{}\"];", name, label).ok();
         }
     }
-    writeln!(
-        s,
-        "  node [style=filled fillcolor=red shape=doublecircle];{};",
-        root_names
-    )
-    .ok();
-    writeln!(s, "  node [style=\"\" shape=circle];").ok();
 
     for (idx, _blob) in stats.blobs.iter().enumerate() {
         let node = &stats.depths[idx];
