@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use futures::lock::*;
 use futures::prelude::*;
+use log::*;
 use pbr::ProgressBar;
 
 use crate::rw::*;

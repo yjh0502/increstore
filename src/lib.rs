@@ -1,9 +1,8 @@
-#[macro_use]
-extern crate log;
-
-use rayon::prelude::*;
 use std::io;
 use std::path::*;
+
+use log::*;
+use rayon::prelude::*;
 use stopwatch::Stopwatch;
 use tempfile::*;
 
@@ -18,6 +17,8 @@ use db::Blob;
 use rw::*;
 use stats::Stats;
 use std::env;
+
+pub enum Error {}
 
 pub fn max_root_blobs() -> usize {
     5
@@ -386,5 +387,9 @@ pub fn debug_graph(filename: &str) -> io::Result<()> {
 
     std::fs::write(filename, s)?;
 
+    Ok(())
+}
+
+pub fn debug_list_files() -> io::Result<()> {
     Ok(())
 }

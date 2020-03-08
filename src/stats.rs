@@ -1,4 +1,5 @@
 use crate::db::Blob;
+use log::*;
 
 #[derive(Default)]
 pub struct GraphNode {
