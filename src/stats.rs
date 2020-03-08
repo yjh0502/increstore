@@ -25,6 +25,7 @@ pub struct Stats {
 impl Stats {
     pub fn from_blobs(blobs: Vec<Blob>) -> Self {
         let mut stats = Stats::default();
+        let len = blobs.len();
 
         for blob in &blobs {
             stats.add_blob(blob);
@@ -32,17 +33,28 @@ impl Stats {
 
         stats.depths = Vec::with_capacity(blobs.len());
         stats.depths.resize_with(blobs.len(), Default::default);
-
-        for i in 0..blobs.len() {
-            calculate_depth(i, &blobs, &mut stats.depths);
-        }
-
-        for i in 0..blobs.len() {
-            add_child_count(i, &mut stats.depths);
-        }
-
         stats.blobs = blobs;
+
+        for i in 0..len {
+            calculate_depth(i, &stats.blobs, &mut stats.depths);
+        }
+
+        for i in 0..len {
+            stats.add_child_count(i);
+        }
+
         stats
+    }
+
+    fn add_child_count(&mut self, idx: usize) {
+        self.depths[idx].child_count += 1;
+        if let Some(parent_idx) = self.depths[idx].parent_idx {
+            self.add_child_count(parent_idx);
+        } else {
+            for alias_idx in self.aliases(idx) {
+                self.add_child_count(alias_idx);
+            }
+        }
     }
 
     fn add_blob(&mut self, blob: &Blob) {
@@ -62,7 +74,7 @@ impl Stats {
     fn root_age(&self, root_idx: usize) -> usize {
         let max_idx = self.blobs.len();
         let last_idx = self
-            .children(root_idx)
+            .children(root_idx, true)
             .into_iter()
             .max()
             .unwrap_or(root_idx);
@@ -127,7 +139,7 @@ impl Stats {
         format!("B{}", idx)
     }
 
-    pub fn children(&self, idx: usize) -> Vec<usize> {
+    pub fn children(&self, idx: usize, include_root: bool) -> Vec<usize> {
         let mut children = Vec::new();
 
         for (child_idx, _child) in self.blobs.iter().enumerate() {
@@ -136,13 +148,15 @@ impl Stats {
             }
 
             // excludes children with full blob alias
-            let aliases = self.aliases(child_idx);
-            if aliases
-                .into_iter()
-                .find(|idx| self.blobs[*idx].is_root())
-                .is_some()
-            {
-                continue;
+            if !include_root {
+                let aliases = self.aliases(child_idx);
+                if aliases
+                    .into_iter()
+                    .find(|idx| self.blobs[*idx].is_root())
+                    .is_some()
+                {
+                    continue;
+                }
             }
 
             children.push(child_idx);
@@ -216,7 +230,7 @@ impl Stats {
                                 self.root_age(idx),
                                 ByteSize(blob.content_size),
                                 self.blobs[alias_idx].compression_ratio()*100.0,
-                                self.children(idx).len(),
+                                self.children(idx, true).len(),
                                 ByteSize(self.root_score(idx))
                             )
                             .ok();
@@ -256,13 +270,6 @@ impl Stats {
         }
 
         s
-    }
-}
-
-fn add_child_count(idx: usize, depths: &mut [GraphNode]) {
-    depths[idx].child_count += 1;
-    if let Some(parent_idx) = depths[idx].parent_idx {
-        add_child_count(parent_idx, depths);
     }
 }
 
