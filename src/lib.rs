@@ -362,20 +362,37 @@ pub fn debug_graph(filename: &str) -> Result<()> {
 
     let mut s = String::new();
     writeln!(s, "digraph increstore {{").ok();
+    writeln!(s, "  rankdir=\"LR\"").ok();
+
+    let min_size = (stats.blobs.iter().map(|v| v.store_size).min().unwrap_or(10) as f32).log10();
+    let max_size = (stats.blobs.iter().map(|v| v.store_size).max().unwrap_or(10) as f32).log10();
+
+    let min_width = 0.4;
+    let max_width = 2.0;
+    let abs_min_width = 0.7;
+
+    let size_project = |size: u64| {
+        let size = (size as f32).log10();
+        let ratio = (size - min_size) / (max_size - min_size);
+        (min_width + (max_width - min_width) * ratio).max(abs_min_width)
+    };
 
     for (idx, blob) in stats.blobs.iter().enumerate() {
         let name = stats.node_name(idx);
         let label = format!("{}\\n{}", name, bytesize::ByteSize(blob.store_size));
-        if blob.is_root() {
-            writeln!(
-                s,
-                "  {} [label=\"{}\" style=filled fillcolor=red shape=doublecircle];",
-                name, label
-            )
-            .ok();
+
+        let size = size_project(blob.store_size);
+        let style = if blob.is_root() {
+            "shape=doublecircle style=filled fillcolor=red"
         } else {
-            writeln!(s, "  {} [label=\"{}\"];", name, label).ok();
-        }
+            "shape=circle"
+        };
+        writeln!(
+            s,
+            "  {} [label=\"{}\" width={:.02} fixedsize=true {}];",
+            name, label, size, style
+        )
+        .ok();
     }
 
     for (idx, _blob) in stats.blobs.iter().enumerate() {
@@ -384,8 +401,8 @@ pub fn debug_graph(filename: &str) -> Result<()> {
             writeln!(
                 s,
                 "  {} -> {};",
+                stats.node_name(parent_idx),
                 stats.node_name(idx),
-                stats.node_name(parent_idx)
             )
             .ok();
             //
