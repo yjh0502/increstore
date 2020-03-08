@@ -69,9 +69,24 @@ impl<W> HashRW<W> {
     }
 }
 
+impl<W: io::Read> io::Read for HashRW<W> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        // debug!("HashRw::write size={}", buf.len());
+        match self.w.read(buf) {
+            Ok(n) => {
+                self.meta.size += n as u64;
+                // self.meta.hash.update(&buf[..n]);
+                self.meta.hash0.append(&buf[..n]);
+                Ok(n)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
 impl<W: io::Write> io::Write for HashRW<W> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        // debug!("HashRw::write size={}", buf.len());
+        // debug!("HashRw::read size={}", buf.len());
         match self.w.write(buf) {
             Ok(n) => {
                 self.meta.size += n as u64;

@@ -130,8 +130,8 @@ pub fn get(filename: &str, out_filename: &str) -> Result<()> {
         src_filepath = old_tmpfile.path().to_path_buf();
     }
 
-    // result: tmpfile
-    tmpfile.persist(out_filename)?;
+    // result: old_tmpfile
+    old_tmpfile.persist(out_filename)?;
 
     Ok(())
 }
@@ -479,6 +479,25 @@ pub fn debug_list_files(roots: bool, non_roots: bool, long: bool) -> Result<()> 
             }
         }
     }
+
+    Ok(())
+}
+
+pub fn debug_hash(filename: &str) -> Result<()> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(filename)?;
+    let mut reader = rw::HashRW::new(file);
+
+    let buf_size = 8 * 1024 * 1024;
+    let mut buf = Vec::with_capacity(buf_size);
+    buf.resize(buf_size, 0u8);
+
+    while reader.read(&mut buf)? != 0 {
+        //
+    }
+
+    println!("{}", reader.meta().digest());
 
     Ok(())
 }

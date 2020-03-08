@@ -24,6 +24,7 @@ enum MySubCommandEnum {
     Stats(SubCommandStats),
     Graph(SubCommandGraph),
     ListFiles(SubCommandListFiles),
+    Hash(SubCommandHash),
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -103,6 +104,14 @@ struct SubCommandListFiles {
     long: bool,
 }
 
+#[derive(FromArgs, PartialEq, Debug)]
+/// debug-list-files
+#[argh(subcommand, name = "debug-hash")]
+struct SubCommandHash {
+    #[argh(positional)]
+    filename: String,
+}
+
 fn main() -> Result<()> {
     env_logger::init();
 
@@ -145,6 +154,9 @@ fn main() -> Result<()> {
         }
         MySubCommandEnum::ListFiles(cmd) => {
             debug_list_files(cmd.roots, cmd.non_roots, cmd.long)?;
+        }
+        MySubCommandEnum::Hash(cmd) => {
+            debug_hash(&cmd.filename)?;
         }
     }
 
