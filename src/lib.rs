@@ -46,7 +46,7 @@ pub fn tmpdir() -> String {
     tmp_dir
 }
 
-fn filepath(s: &str) -> PathBuf {
+fn filepath(s: &str) -> String {
     format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..]).into()
 }
 
@@ -110,7 +110,7 @@ pub fn get(filename: &str, out_filename: &str) -> Result<()> {
     let mut old_tmpfile = NamedTempFile::new_in(&tmp_dir)?;
     let mut tmpfile = NamedTempFile::new_in(&tmp_dir)?;
 
-    let mut src_filepath = filepath(&blob.content_hash);
+    let mut src_filepath = PathBuf::from(filepath(&blob.content_hash));
     for delta_blob in decode_path {
         let delta_filepath = filepath(&delta_blob.store_hash);
         debug!("decode filename={}", delta_blob.filename);
@@ -401,11 +401,16 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn debug_list_files(roots: bool, non_roots: bool) -> Result<()> {
+pub fn debug_list_files(roots: bool, non_roots: bool, long: bool) -> Result<()> {
     let blobs = db::all()?;
     for blob in blobs {
         if (roots && blob.is_root()) || (non_roots && !blob.is_root()) {
-            println!("{:?}", filepath(&blob.store_hash));
+            let path = filepath(&blob.store_hash);
+            if long {
+                println!("{} {}", path, blob.filename);
+            } else {
+                println!("{}", path);
+            }
         }
     }
 

@@ -76,6 +76,8 @@ struct SubCommandListFiles {
     roots: bool,
     #[argh(description = "non-roots", switch)]
     non_roots: bool,
+    #[argh(description = "long", switch, short = 'l')]
+    long: bool,
 }
 
 fn main() -> Result<()> {
@@ -108,7 +110,7 @@ fn main() -> Result<()> {
             debug_graph(&cmd.filename)?;
         }
         MySubCommandEnum::ListFiles(cmd) => {
-            debug_list_files(cmd.roots, cmd.non_roots)?;
+            debug_list_files(cmd.roots, cmd.non_roots, cmd.long)?;
         }
     }
 
