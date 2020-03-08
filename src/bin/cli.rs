@@ -15,6 +15,9 @@ enum MySubCommandEnum {
     Get(SubCommandGet),
     Exists(SubCommandExists),
 
+    Dedytrate(SubCommandDehydrate),
+    Hydrate(SubCommandHydrate),
+
     BenchZip(SubCommandBenchZip),
 
     CleanUp(SubCommandCleanUp),
@@ -49,6 +52,16 @@ struct SubCommandExists {
     #[argh(positional)]
     filename: String,
 }
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// dehydrate
+#[argh(subcommand, name = "dehydrate")]
+struct SubCommandDehydrate {}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// dehydrate
+#[argh(subcommand, name = "hydrate")]
+struct SubCommandHydrate {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// bench-zip
@@ -108,6 +121,13 @@ fn main() -> Result<()> {
         }
         MySubCommandEnum::Exists(cmd) => {
             exists(&cmd.filename)?;
+        }
+
+        MySubCommandEnum::Dedytrate(_cmd) => {
+            dehydrate()?;
+        }
+        MySubCommandEnum::Hydrate(_cmd) => {
+            hydrate()?;
         }
 
         MySubCommandEnum::BenchZip(cmd) => {

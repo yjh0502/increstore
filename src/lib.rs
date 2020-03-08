@@ -110,7 +110,7 @@ pub fn get(filename: &str, out_filename: &str) -> Result<()> {
         let delta_filepath = filepath(&delta_blob.store_hash);
         debug!("decode filename={}", delta_blob.filename);
         debug!("trace={:?}, input={:?}", src_filepath, delta_filepath);
-        let (_input_meta, _dst_meta) = async_std::task::block_on(async {
+        let (_input_meta, dst_meta) = async_std::task::block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
             let input_file = async_std::fs::File::open(&delta_filepath).await?;
             let dst_file = async_std::fs::File::create(tmpfile.path()).await?;
@@ -123,7 +123,9 @@ pub fn get(filename: &str, out_filename: &str) -> Result<()> {
             .await
         })?;
 
-        assert_eq!(delta_blob.content_hash, _dst_meta.digest());
+        trace!("delta.content_hash={}", delta_blob.content_hash);
+        trace!("dst.content_hash  ={}", dst_meta.digest());
+        assert_eq!(delta_blob.content_hash, dst_meta.digest());
         std::mem::swap(&mut tmpfile, &mut old_tmpfile);
         src_filepath = old_tmpfile.path().to_path_buf();
     }
@@ -146,34 +148,48 @@ pub fn exists(filename: &str) -> Result<()> {
     Ok(())
 }
 
-struct RootBlob<'a> {
-    blob: &'a Blob,
-    alias: &'a Blob,
-    score: u64,
+pub fn dehydrate() -> Result<()> {
+    let blobs = db::all()?;
+    let stats = Stats::from_blobs(blobs);
+
+    let root_candidates = stats.root_candidates();
+    for root_blob in root_candidates {
+        let path = filepath(&root_blob.blob.content_hash);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {
+                info!("dehydrating blob={}", path);
+            }
+            Err(_e) => {
+                info!(
+                    "dehydrating blob={} failed, already dehydrated? err={:?}",
+                    path, _e
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub fn hydrate() -> Result<()> {
+    let blobs = db::all()?;
+    let stats = Stats::from_blobs(blobs);
+
+    let root_candidates = stats.root_candidates();
+    for root_blob in root_candidates {
+        let path = filepath(&root_blob.blob.content_hash);
+        info!("hydrating blob={}", path);
+        get(&root_blob.blob.filename, &path)?;
+    }
+
+    Ok(())
 }
 
 pub fn cleanup() -> Result<()> {
     let blobs = db::all()?;
     let stats = Stats::from_blobs(blobs);
 
-    let mut root_candidates = Vec::new();
-    for (root_idx, root_blob) in stats.blobs.iter().enumerate() {
-        if root_blob.parent_hash.is_some() {
-            continue;
-        }
-
-        let mut aliases = stats.aliases(root_idx);
-        if let Some(alias_idx) = aliases.pop() {
-            let alias = &stats.blobs[alias_idx];
-            let score = stats.root_score(root_idx);
-            root_candidates.push(RootBlob {
-                blob: root_blob,
-                alias,
-                score,
-            });
-        }
-    }
-
+    let mut root_candidates = stats.root_candidates();
     root_candidates.sort_by_key(|blob| {
         // sort by score desc
         u64::max_value() - blob.score

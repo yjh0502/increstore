@@ -1,6 +1,12 @@
 use crate::db::Blob;
 use log::*;
 
+pub struct RootBlob<'a> {
+    pub blob: &'a Blob,
+    pub alias: &'a Blob,
+    pub score: u64,
+}
+
 #[derive(Default)]
 pub struct GraphNode {
     pub depth: usize,
@@ -162,6 +168,29 @@ impl Stats {
             children.push(child_idx);
         }
         children
+    }
+
+    //TODO: name
+    pub fn root_candidates(&self) -> Vec<RootBlob> {
+        let mut root_candidates = Vec::new();
+        for (root_idx, root_blob) in self.blobs.iter().enumerate() {
+            if root_blob.parent_hash.is_some() {
+                continue;
+            }
+
+            let mut aliases = self.aliases(root_idx);
+            if let Some(alias_idx) = aliases.pop() {
+                let alias = &self.blobs[alias_idx];
+                let score = self.root_score(root_idx);
+                root_candidates.push(RootBlob {
+                    blob: root_blob,
+                    alias,
+                    score,
+                });
+            }
+        }
+
+        root_candidates
     }
 
     pub fn size_info(&self) -> String {
