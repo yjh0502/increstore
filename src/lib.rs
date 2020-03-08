@@ -139,6 +139,18 @@ pub fn get(filename: &str, out_filename: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn exists(filename: &str) -> Result<()> {
+    let input_filename = Path::new(&filename).file_name().unwrap().to_str().unwrap();
+
+    let blobs = db::by_filename(&input_filename)?;
+    if blobs.is_empty() {
+        std::process::exit(1);
+    } else {
+        println!("{}", blobs[0].store_hash);
+    }
+    Ok(())
+}
+
 struct RootBlob<'a> {
     blob: &'a Blob,
     alias: &'a Blob,

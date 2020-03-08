@@ -13,6 +13,8 @@ struct TopLevel {
 enum MySubCommandEnum {
     Push(SubCommandPush),
     Get(SubCommandGet),
+    Exists(SubCommandExists),
+
     BenchZip(SubCommandBenchZip),
 
     CleanUp(SubCommandCleanUp),
@@ -38,6 +40,14 @@ struct SubCommandGet {
 
     #[argh(positional)]
     out_filename: String,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// exists
+#[argh(subcommand, name = "exists")]
+struct SubCommandExists {
+    #[argh(positional)]
+    filename: String,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -96,6 +106,10 @@ fn main() -> Result<()> {
         MySubCommandEnum::Get(cmd) => {
             get(&cmd.filename, &cmd.out_filename)?;
         }
+        MySubCommandEnum::Exists(cmd) => {
+            exists(&cmd.filename)?;
+        }
+
         MySubCommandEnum::BenchZip(cmd) => {
             bench_zip(&cmd.filename, cmd.parallel)?;
         }
