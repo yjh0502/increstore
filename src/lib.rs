@@ -69,15 +69,14 @@ where
     Ok(())
 }
 
-fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<()> {
+fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<bool> {
     let path = filepath(&blob.store_hash);
 
     trace!("path={:?}", path);
     store_object(tmp_path, &path)?;
 
     // TODO: update id
-    db::insert(blob)?;
-    Ok(())
+    db::insert(blob).map_err(Error::from)
 }
 
 pub fn get(filename: &str, out_filename: &str) -> Result<()> {
@@ -238,12 +237,15 @@ fn store_zip_blob(input_filepath: &str) -> Result<Blob> {
     Ok(input_blob)
 }
 
-fn append_zip_full(input_filepath: &str) -> Result<Blob> {
+fn append_zip_full(input_filepath: &str) -> Result<Option<Blob>> {
     trace!("append_zip_full: input_filepath={}", input_filepath);
 
     let blob = store_zip_blob(input_filepath)?;
-    db::insert(&blob)?;
-    Ok(blob)
+    if db::insert(&blob)? {
+        Ok(Some(blob))
+    } else {
+        Ok(None)
+    }
 }
 
 use std::sync::{atomic::AtomicUsize, Arc};
@@ -294,7 +296,13 @@ fn append_zip_delta(
             blob.content_hash,
             blob.store_hash
         );
-        update_blob(tmp_path, &blob)?;
+        if !update_blob(tmp_path, &blob)? {
+            info!(
+                "append_zip_delta: failed to insert, store_hash={}",
+                blob.store_hash
+            );
+            return Ok(None);
+        }
         blob
     };
     let dt_store_delta = sw.elapsed_ms();
@@ -321,10 +329,17 @@ pub fn push_zip(input_filepath: &str) -> Result<()> {
     let root_blobs = db::roots()?;
 
     let sw = Stopwatch::start_new();
-    let input_blob = append_zip_full(input_filepath)?;
+    let input_blob = match append_zip_full(input_filepath)? {
+        Some(blob) => blob,
+        None => {
+            info!("append_zip: content already exists, skipping");
+            return Ok(());
+        }
+    };
     info!("append_zip: dt_store_zip={}ms", sw.elapsed_ms(),);
 
     if root_blobs.is_empty() {
+        info!("append_zip: no root blobs: genesis");
         return Ok(());
     }
 
