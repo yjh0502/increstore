@@ -204,6 +204,44 @@ impl Stats {
         root_candidates
     }
 
+    pub fn spine(&self) -> Vec<usize> {
+        // TODO: genesis
+        let mut spine_idx = 0;
+        let mut spine = Vec::new();
+        loop {
+            spine.push(spine_idx);
+            let children = self.children_all(spine_idx);
+            if children.is_empty() {
+                break;
+            }
+
+            // for debugging
+            let mut candidates = Vec::new();
+
+            let mut max_child_count = 0;
+            let mut max_child_idx = 0;
+            let mut update_child = |idx: usize| {
+                let child_count = self.depths[idx].child_count;
+                if child_count > max_child_count {
+                    max_child_count = child_count;
+                    max_child_idx = idx;
+                }
+
+                candidates.push((self.node_name(idx), child_count));
+            };
+
+            for child_idx in children {
+                update_child(child_idx);
+                for alias_idx in self.aliases(child_idx) {
+                    update_child(alias_idx);
+                }
+            }
+            trace!("candidates={:?}", candidates);
+            spine_idx = max_child_idx;
+        }
+        return spine;
+    }
+
     pub fn size_info(&self) -> String {
         use bytesize::ByteSize;
         use std::fmt::Write;

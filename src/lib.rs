@@ -443,40 +443,17 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     }
 
     {
-        let mut spline_idx = 0;
-        let mut spline = stats.node_name(spline_idx);
-        loop {
-            let children = stats.children_all(spline_idx);
-            if children.is_empty() {
-                break;
+        let spine = stats.spine();
+
+        for (i, idx) in spine.into_iter().enumerate() {
+            let name = stats.node_name(idx);
+            if i == 0 {
+                writeln!(s, "{}", name).ok();
+            } else {
+                writeln!(s, "->{}", name).ok();
             }
-
-            // for debugging
-            let mut candidates = Vec::new();
-
-            let mut max_child_count = 0;
-            let mut max_child_idx = 0;
-            let mut update_child = |idx: usize| {
-                let child_count = stats.depths[idx].child_count;
-                if child_count > max_child_count {
-                    max_child_count = child_count;
-                    max_child_idx = idx;
-                }
-
-                candidates.push((stats.node_name(idx), child_count));
-            };
-
-            for child_idx in children {
-                update_child(child_idx);
-                for alias_idx in stats.aliases(child_idx) {
-                    update_child(alias_idx);
-                }
-            }
-            trace!("candidates={:?}", candidates);
-            write!(spline, "->{}", stats.node_name(max_child_idx)).ok();
-            spline_idx = max_child_idx;
         }
-        writeln!(s, "  {} [style=invis weight=100]", spline).ok();
+        writeln!(s, " [style=invis weight=100]").ok();
     }
 
     for (idx, _blob) in stats.blobs.iter().enumerate() {
