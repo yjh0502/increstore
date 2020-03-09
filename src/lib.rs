@@ -446,14 +446,13 @@ pub fn debug_graph(filename: &str) -> Result<()> {
         let mut spline_idx = 0;
         let mut spline = stats.node_name(spline_idx);
         loop {
-            // TODO: handle root spline node
-            if let Some(alias_idx) = stats.aliases(spline_idx).pop() {
-                spline_idx = alias_idx;
-            }
-            let children = stats.children(spline_idx, true);
+            let children = stats.children_all(spline_idx);
             if children.is_empty() {
                 break;
             }
+
+            // for debugging
+            let mut candidates = Vec::new();
 
             let mut max_child_count = 0;
             let mut max_child_idx = 0;
@@ -463,6 +462,8 @@ pub fn debug_graph(filename: &str) -> Result<()> {
                     max_child_count = child_count;
                     max_child_idx = idx;
                 }
+
+                candidates.push((stats.node_name(idx), child_count));
             };
 
             for child_idx in children {
@@ -471,6 +472,7 @@ pub fn debug_graph(filename: &str) -> Result<()> {
                     update_child(alias_idx);
                 }
             }
+            trace!("candidates={:?}", candidates);
             write!(spline, "->{}", stats.node_name(max_child_idx)).ok();
             spline_idx = max_child_idx;
         }

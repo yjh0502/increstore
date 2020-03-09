@@ -145,6 +145,17 @@ impl Stats {
         format!("B{}", idx)
     }
 
+    pub fn children_all(&self, idx: usize) -> Vec<usize> {
+        let mut children = self.children(idx, true);
+        for alias_idx in self.aliases(idx) {
+            children.extend(self.children(alias_idx, true));
+        }
+
+        children.sort();
+        children.dedup();
+        return children;
+    }
+
     pub fn children(&self, idx: usize, include_root: bool) -> Vec<usize> {
         let mut children = Vec::new();
 
