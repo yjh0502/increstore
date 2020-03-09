@@ -109,6 +109,8 @@ struct SubCommandGraph {
 /// debug-list-files
 #[argh(subcommand, name = "debug-ls-files")]
 struct SubCommandListFiles {
+    #[argh(description = "genesis", switch)]
+    genesis: bool,
     #[argh(description = "roots", switch)]
     roots: bool,
     #[argh(description = "non-roots", switch)]
@@ -149,7 +151,9 @@ fn main() -> Result<()> {
         MySubCommandEnum::CleanUp(_cmd) => cleanup(),
         MySubCommandEnum::Stats(_cmd) => debug_stats(),
         MySubCommandEnum::Graph(cmd) => debug_graph(&cmd.filename),
-        MySubCommandEnum::ListFiles(cmd) => debug_list_files(cmd.roots, cmd.non_roots, cmd.long),
+        MySubCommandEnum::ListFiles(cmd) => {
+            debug_list_files(cmd.genesis, cmd.roots, cmd.non_roots, cmd.long)
+        }
         MySubCommandEnum::Hash(cmd) => debug_hash(&cmd.filename),
     }
 }

@@ -493,16 +493,23 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn debug_list_files(roots: bool, non_roots: bool, long: bool) -> Result<()> {
+pub fn debug_list_files(genesis: bool, roots: bool, non_roots: bool, long: bool) -> Result<()> {
     let blobs = db::all()?;
-    for blob in blobs {
-        if (roots && blob.is_root()) || (non_roots && !blob.is_root()) {
-            let path = filepath(&blob.store_hash);
-            if long {
-                println!("{} {}", path, blob.filename);
-            } else {
-                println!("{}", path);
-            }
+    for (idx, blob) in blobs.into_iter().enumerate() {
+        let is_root = blob.is_root();
+
+        // TODO: better genesis check?
+        let should_print = (roots && is_root) || (non_roots && !is_root) || (genesis && idx == 0);
+
+        if !should_print {
+            continue;
+        }
+
+        let path = filepath(&blob.store_hash);
+        if long {
+            println!("{} {}", path, blob.filename);
+        } else {
+            println!("{}", path);
         }
     }
 
