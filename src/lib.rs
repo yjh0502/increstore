@@ -522,14 +522,15 @@ pub fn debug_list_files(genesis: bool, roots: bool, non_roots: bool, long: bool)
 }
 
 pub fn debug_hash(filename: &str) -> Result<()> {
+    const BUF_SIZE: usize = 8 * 1024 * 1024;
+
     use std::io::Read;
 
     let file = std::fs::File::open(filename)?;
     let mut reader = rw::HashRW::new(file);
 
-    let buf_size = 8 * 1024 * 1024;
-    let mut buf = Vec::with_capacity(buf_size);
-    buf.resize(buf_size, 0u8);
+    let mut buf = Vec::with_capacity(BUF_SIZE);
+    buf.resize(BUF_SIZE, 0u8);
 
     while reader.read(&mut buf)? != 0 {
         //
