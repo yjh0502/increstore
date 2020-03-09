@@ -7,6 +7,7 @@ use stopwatch::Stopwatch;
 use tempfile::*;
 use thiserror::Error;
 
+mod batch;
 pub mod db;
 mod delta;
 mod rw;
@@ -14,6 +15,7 @@ mod stats;
 pub mod zip;
 
 use crate::zip::store_zip;
+pub use batch::import_urls;
 use db::Blob;
 use rw::*;
 use stats::Stats;
@@ -27,6 +29,8 @@ pub enum Error {
     Rsqlite(#[from] rusqlite::Error),
     #[error(transparent)]
     TempFilePersist(#[from] tempfile::PersistError),
+    #[error(transparent)]
+    Hyper(#[from] hyper::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

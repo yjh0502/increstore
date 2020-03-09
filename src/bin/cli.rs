@@ -18,6 +18,8 @@ enum MySubCommandEnum {
     Dedytrate(SubCommandDehydrate),
     Hydrate(SubCommandHydrate),
 
+    ImportUrls(SubCommandImportUrls),
+
     BenchZip(SubCommandBenchZip),
 
     CleanUp(SubCommandCleanUp),
@@ -63,6 +65,14 @@ struct SubCommandDehydrate {}
 /// dehydrate
 #[argh(subcommand, name = "hydrate")]
 struct SubCommandHydrate {}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// import-urls
+#[argh(subcommand, name = "import-urls")]
+struct SubCommandImportUrls {
+    #[argh(positional)]
+    filename: String,
+}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// bench-zip
@@ -122,43 +132,21 @@ fn main() -> Result<()> {
     let up: TopLevel = argh::from_env();
 
     match up.nested {
-        MySubCommandEnum::Push(cmd) => {
-            push_zip(&cmd.filename)?;
-        }
-        MySubCommandEnum::Get(cmd) => {
-            get(&cmd.filename, &cmd.out_filename)?;
-        }
-        MySubCommandEnum::Exists(cmd) => {
-            exists(&cmd.filename)?;
-        }
+        MySubCommandEnum::Push(cmd) => push_zip(&cmd.filename),
+        MySubCommandEnum::Get(cmd) => get(&cmd.filename, &cmd.out_filename),
+        MySubCommandEnum::Exists(cmd) => exists(&cmd.filename),
 
-        MySubCommandEnum::Dedytrate(_cmd) => {
-            dehydrate()?;
-        }
-        MySubCommandEnum::Hydrate(_cmd) => {
-            hydrate()?;
-        }
+        MySubCommandEnum::Dedytrate(_cmd) => dehydrate(),
+        MySubCommandEnum::Hydrate(_cmd) => hydrate(),
 
-        MySubCommandEnum::BenchZip(cmd) => {
-            bench_zip(&cmd.filename, cmd.parallel)?;
-        }
+        MySubCommandEnum::ImportUrls(cmd) => import_urls(&cmd.filename),
 
-        MySubCommandEnum::CleanUp(_cmd) => {
-            cleanup()?;
-        }
-        MySubCommandEnum::Stats(_cmd) => {
-            debug_stats()?;
-        }
-        MySubCommandEnum::Graph(cmd) => {
-            debug_graph(&cmd.filename)?;
-        }
-        MySubCommandEnum::ListFiles(cmd) => {
-            debug_list_files(cmd.roots, cmd.non_roots, cmd.long)?;
-        }
-        MySubCommandEnum::Hash(cmd) => {
-            debug_hash(&cmd.filename)?;
-        }
+        MySubCommandEnum::BenchZip(cmd) => bench_zip(&cmd.filename, cmd.parallel),
+
+        MySubCommandEnum::CleanUp(_cmd) => cleanup(),
+        MySubCommandEnum::Stats(_cmd) => debug_stats(),
+        MySubCommandEnum::Graph(cmd) => debug_graph(&cmd.filename),
+        MySubCommandEnum::ListFiles(cmd) => debug_list_files(cmd.roots, cmd.non_roots, cmd.long),
+        MySubCommandEnum::Hash(cmd) => debug_hash(&cmd.filename),
     }
-
-    Ok(())
 }

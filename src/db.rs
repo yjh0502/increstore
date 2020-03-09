@@ -147,12 +147,12 @@ limit 1"#,
     )
 }
 
-pub fn insert(blob: &Blob) -> Result<()> {
+pub fn insert(blob: &Blob) -> Result<bool> {
     let conn = Connection::open(dbpath())?;
 
-    conn.execute(
+    let inserted = conn.execute(
         r#"
-insert into blobs (
+insert or ignore into blobs (
     filename,
     time_created,
     store_size,
@@ -173,7 +173,7 @@ insert into blobs (
         ],
     )?;
 
-    Ok(())
+    Ok(inserted > 0)
 }
 
 pub fn remove(blob: &Blob) -> Result<()> {
