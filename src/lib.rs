@@ -84,19 +84,24 @@ fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<bool> {
 }
 
 pub fn get(filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
-    let mut blobs = db::by_filename(filename)?;
-    if blobs.is_empty() {
-        panic!("unknown filename: {}", filename);
-    }
+    let mut blob = match db::by_filename(filename)?.pop() {
+        Some(blob) => blob,
+        None => {
+            eprintln!("unknown filename: {}", filename);
+            //TODO
+            return Ok(());
+        }
+    };
 
     let mut decode_path = Vec::new();
 
-    let mut blob = blobs.pop().unwrap();
+    //TODO: use graph?
     while let Some(parent_hash) = &blob.parent_hash {
-        let mut blobs = db::by_content_hash(parent_hash)?;
-        assert!(!blobs.is_empty());
+        let parent_blob = db::by_content_hash(parent_hash)?
+            .pop()
+            .expect(&format!("no blob with content_hash {}", parent_hash));
 
-        let old_blob = std::mem::replace(&mut blob, blobs.pop().unwrap());
+        let old_blob = std::mem::replace(&mut blob, parent_blob);
         decode_path.push(old_blob);
     }
 
