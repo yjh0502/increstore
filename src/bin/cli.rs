@@ -46,6 +46,9 @@ struct SubCommandGet {
 
     #[argh(positional)]
     out_filename: String,
+
+    #[argh(description = "dry-run", switch)]
+    dry_run: bool,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -133,7 +136,7 @@ fn main() -> Result<()> {
 
     match up.nested {
         MySubCommandEnum::Push(cmd) => push_zip(&cmd.filename),
-        MySubCommandEnum::Get(cmd) => get(&cmd.filename, &cmd.out_filename),
+        MySubCommandEnum::Get(cmd) => get(&cmd.filename, &cmd.out_filename, cmd.dry_run),
         MySubCommandEnum::Exists(cmd) => exists(&cmd.filename),
 
         MySubCommandEnum::Dedytrate(_cmd) => dehydrate(),

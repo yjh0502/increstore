@@ -83,7 +83,7 @@ fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<bool> {
     db::insert(blob).map_err(Error::from)
 }
 
-pub fn get(filename: &str, out_filename: &str) -> Result<()> {
+pub fn get(filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
     let mut blobs = db::by_filename(filename)?;
     if blobs.is_empty() {
         panic!("unknown filename: {}", filename);
@@ -101,6 +101,13 @@ pub fn get(filename: &str, out_filename: &str) -> Result<()> {
     }
 
     decode_path.reverse();
+
+    if dry_run {
+        for blob in decode_path {
+            println!("{} {}", filepath(&blob.store_hash), blob.filename);
+        }
+        return Ok(());
+    }
 
     assert!(blob.parent_hash.is_none());
 
@@ -182,7 +189,7 @@ pub fn hydrate() -> Result<()> {
     for root_blob in root_candidates {
         let path = filepath(&root_blob.blob.content_hash);
         info!("hydrating blob={}", path);
-        get(&root_blob.blob.filename, &path)?;
+        get(&root_blob.blob.filename, &path, false)?;
     }
 
     Ok(())
