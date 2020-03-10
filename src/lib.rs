@@ -528,52 +528,81 @@ fn path_to_hash(mut path: PathBuf, root: &Path) -> Option<String> {
 }
 
 pub fn debug_blobs() -> Result<()> {
-    use std::collections::hash_map::Entry;
-    use std::collections::HashMap;
+    let blobs = db::all()?;
 
-    let pathstr = format!("{}/objects", prefix());
-    let objectdir = Path::new(&pathstr);
+    // check blob store
+    {
+        use std::collections::hash_map::Entry;
+        use std::collections::HashMap;
 
-    let mut objects = HashMap::new();
-    for entry in walkdir::WalkDir::new(&objectdir) {
-        let entry = entry?;
-        if entry.file_type().is_dir() {
-            continue;
-        }
-        let hash = match path_to_hash(entry.path().to_path_buf(), &objectdir) {
-            Some(hash) => hash,
-            None => {
-                error!("failed to get hash from path: {:?}", entry.path());
+        let pathstr = format!("{}/objects", prefix());
+        let objectdir = Path::new(&pathstr);
+
+        let mut objects = HashMap::new();
+        for entry in walkdir::WalkDir::new(&objectdir) {
+            let entry = entry?;
+            if entry.file_type().is_dir() {
                 continue;
             }
-        };
-        objects.insert(hash, entry.metadata()?);
-    }
+            let hash = match path_to_hash(entry.path().to_path_buf(), &objectdir) {
+                Some(hash) => hash,
+                None => {
+                    error!("failed to get hash from path: {:?}", entry.path());
+                    continue;
+                }
+            };
+            objects.insert(hash, entry.metadata()?);
+        }
 
-    let blobs = db::all()?;
-    for blob in blobs {
-        match objects.entry(blob.store_hash.clone()) {
-            Entry::Occupied(ent) => {
-                let (_k, v) = ent.remove_entry();
-                if v.len() != blob.store_size {
-                    error!(
-                        "invalid file size: expected={}, actual={}",
-                        blob.store_size,
-                        v.len()
-                    );
+        for blob in &blobs {
+            match objects.entry(blob.store_hash.clone()) {
+                Entry::Occupied(ent) => {
+                    let (_k, v) = ent.remove_entry();
+                    if v.len() != blob.store_size {
+                        error!(
+                            "invalid file size: expected={}, actual={}",
+                            blob.store_size,
+                            v.len()
+                        );
+                    }
+                }
+                Entry::Vacant(_ent) => {
+                    error!("blob not exists: {}", blob.store_hash);
                 }
             }
-            Entry::Vacant(_ent) => {
-                error!("blob not exists: {}", blob.store_hash);
-            }
+        }
+
+        for (k, _v) in objects {
+            error!("unexpected blob: {}", k);
         }
     }
 
-    for (k, _v) in objects {
-        error!("unexpected blob: {}", k);
+    // check if all blobs are reachable from a genesis blob
+    {
+        let stats = Stats::from_blobs(blobs);
+        let mut reached = Vec::with_capacity(stats.blobs.len());
+        reached.resize(stats.blobs.len(), false);
+        mark_reached(0, &stats, &mut reached);
+
+        for (idx, reached) in reached.iter().enumerate() {
+            if stats.blobs[idx].is_root() {
+                continue;
+            }
+
+            if !reached {
+                error!("blob not reachable, idx={}", idx);
+            }
+        }
     }
 
     Ok(())
+}
+
+fn mark_reached(idx: usize, stats: &Stats, reached: &mut [bool]) {
+    reached[idx] = true;
+    for child_idx in stats.children(idx, true) {
+        mark_reached(child_idx, stats, reached);
+    }
 }
 
 pub fn debug_hash(filename: &str) -> Result<()> {
