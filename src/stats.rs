@@ -12,6 +12,9 @@ pub struct GraphNode {
     pub depth: usize,
     pub child_count: usize,
     pub parent_idx: Option<usize>,
+
+    pub children_indices: Vec<usize>,
+    pub alias_indices: Vec<usize>,
 }
 
 #[derive(Default)]
@@ -26,6 +29,7 @@ pub struct Stats {
     // depths
     pub blobs: Vec<Blob>,
     pub depths: Vec<GraphNode>,
+    pub alias_indices: Vec<usize>,
 }
 
 impl Stats {
@@ -119,17 +123,7 @@ impl Stats {
 
     /// TODO: fix name
     pub fn aliases(&self, idx: usize) -> Vec<usize> {
-        let blob0 = &self.blobs[idx];
-        let mut aliases = Vec::new();
-        for (blob_idx, blob) in self.blobs.iter().enumerate() {
-            if blob.store_hash == blob0.store_hash {
-                continue;
-            }
-            if blob.content_hash == blob0.content_hash {
-                aliases.push(blob_idx);
-            }
-        }
-        aliases
+        self.depths[idx].alias_indices.clone()
     }
 
     /// TODO: for graphviz
@@ -159,14 +153,10 @@ impl Stats {
     pub fn children(&self, idx: usize, include_root: bool) -> Vec<usize> {
         let mut children = Vec::new();
 
-        for (child_idx, _child) in self.blobs.iter().enumerate() {
-            if Some(idx) != self.depths[child_idx].parent_idx {
-                continue;
-            }
-
+        for child_idx in &self.depths[idx].children_indices {
             // excludes children with full blob alias
             if !include_root {
-                let aliases = self.aliases(child_idx);
+                let aliases = self.aliases(*child_idx);
                 if aliases
                     .into_iter()
                     .find(|idx| self.blobs[*idx].is_root())
@@ -176,8 +166,9 @@ impl Stats {
                 }
             }
 
-            children.push(child_idx);
+            children.push(*child_idx);
         }
+
         children
     }
 
@@ -356,11 +347,7 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
 
     match blob.parent_hash {
         None => {
-            depths[idx] = GraphNode {
-                depth: 1,
-                child_count: 0,
-                parent_idx: None,
-            };
+            depths[idx].depth = 1;
         }
 
         Some(ref parent_hash) => {
@@ -368,6 +355,11 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
             let mut min_idx = 0;
 
             for (parent_idx, parent) in blobs.iter().enumerate() {
+                // aliases
+                if parent.content_hash == blob.content_hash {
+                    depths[idx].alias_indices.push(parent_idx);
+                }
+
                 if parent_idx == idx {
                     continue;
                 }
@@ -383,14 +375,13 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
                     min_depth = depth;
                     min_idx = parent_idx;
                 }
+
+                depths[parent_idx].children_indices.push(idx);
             }
 
             trace!("{}={}", idx, min_depth + 1);
-            depths[idx] = GraphNode {
-                depth: min_depth + 1,
-                child_count: 0,
-                parent_idx: Some(min_idx),
-            };
+            depths[idx].depth = min_depth + 1;
+            depths[idx].parent_idx = Some(min_idx);
         }
     }
 }
