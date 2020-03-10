@@ -605,7 +605,73 @@ fn mark_reached(idx: usize, stats: &Stats, reached: &mut [bool]) {
     }
 }
 
-pub fn debug_hash(filename: &str) -> Result<()> {
+pub fn validate() -> Result<()> {
+    let blobs = db::all()?;
+    let stats = Stats::from_blobs(blobs);
+
+    validate_blob_root(0, stats)?;
+
+    Ok(())
+}
+
+pub fn validate_blob_root(idx: usize, stats: Stats) -> Result<()> {
+    let blob = &stats.blobs[idx];
+
+    let src_filepath = filepath(&blob.store_hash);
+    validate_blob_children(0, &src_filepath, &stats)?;
+
+    Ok(())
+}
+
+fn validate_blob_children<P: AsRef<Path>>(
+    parent_idx: usize,
+    src_filepath: P,
+    stats: &Stats,
+) -> Result<()> {
+    for child_idx in stats.children(parent_idx, true) {
+        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
+        validate_blob_children(child_idx, &tmpfile, stats)?;
+    }
+
+    Ok(())
+}
+
+fn validate_blob_delta<P: AsRef<Path>>(
+    idx: usize,
+    src_filepath: P,
+    stats: &Stats,
+) -> Result<NamedTempFile> {
+    let blob = &stats.blobs[idx];
+    let delta_filepath = filepath(&blob.store_hash);
+    let tmpfile = NamedTempFile::new_in(&tmpdir())?;
+
+    let sw = Stopwatch::start_new();
+
+    let (_input_meta, dst_meta) = async_std::task::block_on(async {
+        let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
+        let input_file = async_std::fs::File::open(&delta_filepath).await?;
+        let dst_file = async_std::fs::File::create(tmpfile.path()).await?;
+        delta::delta(
+            delta::ProcessMode::Decode,
+            &src_file,
+            &input_file,
+            &dst_file,
+        )
+        .await
+    })?;
+
+    debug!(
+        "validate took={}ms filename={}",
+        sw.elapsed_ms(),
+        blob.filename
+    );
+
+    assert_eq!(blob.content_hash, dst_meta.digest());
+
+    Ok(tmpfile)
+}
+
+fn file_hash(filename: &str) -> Result<String> {
     const BUF_SIZE: usize = 8 * 1024 * 1024;
 
     use std::io::Read;
@@ -620,7 +686,12 @@ pub fn debug_hash(filename: &str) -> Result<()> {
         //
     }
 
-    println!("{}", reader.meta().digest());
+    Ok(reader.meta().digest())
+}
+
+pub fn debug_hash(filename: &str) -> Result<()> {
+    let hash = file_hash(filename)?;
+    println!("{}", hash);
 
     Ok(())
 }

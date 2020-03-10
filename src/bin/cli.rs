@@ -19,6 +19,7 @@ enum MySubCommandEnum {
     Hydrate(SubCommandHydrate),
 
     ImportUrls(SubCommandImportUrls),
+    Validate(SubCommandValidate),
 
     BenchZip(SubCommandBenchZip),
 
@@ -77,6 +78,11 @@ struct SubCommandImportUrls {
     #[argh(positional)]
     filename: String,
 }
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// validate
+#[argh(subcommand, name = "validate")]
+struct SubCommandValidate {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// bench-zip
@@ -151,6 +157,7 @@ fn main() -> Result<()> {
         MySubCommandEnum::Hydrate(_cmd) => hydrate(),
 
         MySubCommandEnum::ImportUrls(cmd) => import_urls(&cmd.filename),
+        MySubCommandEnum::Validate(_cmd) => validate(),
 
         MySubCommandEnum::BenchZip(cmd) => bench_zip(&cmd.filename, cmd.parallel),
 
