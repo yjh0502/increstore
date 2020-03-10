@@ -26,6 +26,7 @@ enum MySubCommandEnum {
     Stats(SubCommandStats),
     Graph(SubCommandGraph),
     ListFiles(SubCommandListFiles),
+    Blobs(SubCommandBlobs),
     Hash(SubCommandHash),
 }
 
@@ -120,6 +121,11 @@ struct SubCommandListFiles {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
+/// debug-graph
+#[argh(subcommand, name = "debug-blobs")]
+struct SubCommandBlobs {}
+
+#[derive(FromArgs, PartialEq, Debug)]
 /// debug-list-files
 #[argh(subcommand, name = "debug-hash")]
 struct SubCommandHash {
@@ -154,6 +160,7 @@ fn main() -> Result<()> {
         MySubCommandEnum::ListFiles(cmd) => {
             debug_list_files(cmd.genesis, cmd.roots, cmd.non_roots, cmd.long)
         }
+        MySubCommandEnum::Blobs(_cmd) => debug_blobs(),
         MySubCommandEnum::Hash(cmd) => debug_hash(&cmd.filename),
     }
 }

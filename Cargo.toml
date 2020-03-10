@@ -28,6 +28,7 @@ zip = "0.5.4"
 hyper = "0.13.3"
 hyper-tls = "0.4.1"
 tokio = "0.2.13"
+walkdir = "2.3.1"
 
 [profile.release]
 debug = true

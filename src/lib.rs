@@ -31,6 +31,8 @@ pub enum Error {
     TempFilePersist(#[from] tempfile::PersistError),
     #[error(transparent)]
     Hyper(#[from] hyper::Error),
+    #[error(transparent)]
+    WalkDir(#[from] walkdir::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -506,6 +508,69 @@ pub fn debug_list_files(genesis: bool, roots: bool, non_roots: bool, long: bool)
         } else {
             println!("{}", path);
         }
+    }
+
+    Ok(())
+}
+
+fn path_to_hash(mut path: PathBuf, root: &Path) -> Option<String> {
+    let mut s = String::new();
+    while let Some(name) = path.file_name() {
+        let file_name = name.to_str()?;
+        s = file_name.to_owned() + &s;
+
+        path.pop();
+        if path == root {
+            break;
+        }
+    }
+    Some(s)
+}
+
+pub fn debug_blobs() -> Result<()> {
+    use std::collections::hash_map::Entry;
+    use std::collections::HashMap;
+
+    let pathstr = format!("{}/objects", prefix());
+    let objectdir = Path::new(&pathstr);
+
+    let mut objects = HashMap::new();
+    for entry in walkdir::WalkDir::new(&objectdir) {
+        let entry = entry?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        let hash = match path_to_hash(entry.path().to_path_buf(), &objectdir) {
+            Some(hash) => hash,
+            None => {
+                error!("failed to get hash from path: {:?}", entry.path());
+                continue;
+            }
+        };
+        objects.insert(hash, entry.metadata()?);
+    }
+
+    let blobs = db::all()?;
+    for blob in blobs {
+        match objects.entry(blob.store_hash.clone()) {
+            Entry::Occupied(ent) => {
+                let (_k, v) = ent.remove_entry();
+                if v.len() != blob.store_size {
+                    error!(
+                        "invalid file size: expected={}, actual={}",
+                        blob.store_size,
+                        v.len()
+                    );
+                }
+            }
+            Entry::Vacant(_ent) => {
+                error!("blob not exists: {}", blob.store_hash);
+            }
+        }
+    }
+
+    for (k, _v) in objects {
+        error!("unexpected blob: {}", k);
     }
 
     Ok(())
