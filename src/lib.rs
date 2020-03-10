@@ -445,6 +445,17 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     {
         let spine = stats.spine();
 
+        for (idx, pair) in spine.windows(2).enumerate() {
+            writeln!(
+                s,
+                "{}->{}[label=\"{}\"];",
+                stats.node_name(pair[0]),
+                stats.node_name(pair[1]),
+                idx
+            )
+            .ok();
+        }
+
         for (i, idx) in spine.into_iter().enumerate() {
             let name = stats.node_name(idx);
             if i == 0 {
