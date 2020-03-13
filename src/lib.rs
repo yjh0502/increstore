@@ -639,7 +639,9 @@ fn validate_blob_children<P: AsRef<Path>>(
         let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
         validate_blob_children(child_idx, tmpfile, stats)?;
     }
+
     if let Some(child_idx) = last {
+        // drop src_filepath (probably NamedTempFile itself) while handling last child
         let tmpfile = validate_blob_delta(child_idx, src_filepath, &stats)?;
         validate_blob_children(child_idx, tmpfile, stats)?;
     }
