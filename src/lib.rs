@@ -628,12 +628,53 @@ fn validate_blob_children<P: AsRef<Path>>(
     src_filepath: P,
     stats: &Stats,
 ) -> Result<()> {
-    for child_idx in stats.children(parent_idx, true) {
-        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
-        validate_blob_children(child_idx, &tmpfile, stats)?;
-    }
+    // let children = stats.children(parent_idx, true);
+    // validate_blob_children_par(&children, src_filepath, stats)
 
+    let mut children = stats.children(parent_idx, true);
+    children.sort_by_key(|idx| stats.depths[*idx].child_count);
+
+    let last = children.pop();
+    for child_idx in children {
+        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
+        validate_blob_children(child_idx, tmpfile, stats)?;
+    }
+    if let Some(child_idx) = last {
+        let tmpfile = validate_blob_delta(child_idx, src_filepath, &stats)?;
+        validate_blob_children(child_idx, tmpfile, stats)?;
+    }
     Ok(())
+}
+
+#[allow(unused)]
+fn validate_blob_children_par<P: AsRef<Path>>(
+    children_indices: &[usize],
+    src_filepath: P,
+    stats: &Stats,
+) -> Result<()> {
+    let len = children_indices.len();
+    match len {
+        0 => Ok(()),
+        1 => {
+            let child_idx = children_indices[0];
+            let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
+            validate_blob_children(child_idx, tmpfile, stats)
+        }
+        _ => {
+            let mid = children_indices.len() / 2;
+            let slice0 = &children_indices[..mid];
+            let slice1 = &children_indices[mid..];
+
+            let path = src_filepath.as_ref();
+            let (r0, r1) = rayon::join(
+                || validate_blob_children_par(slice0, path, stats),
+                || validate_blob_children_par(slice1, path, stats),
+            );
+            r0?;
+            r1?;
+            Ok(())
+        }
+    }
 }
 
 fn validate_blob_delta<P: AsRef<Path>>(
