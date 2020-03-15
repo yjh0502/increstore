@@ -687,13 +687,14 @@ fn validate_blob_delta<P: AsRef<Path>>(
     let blob = &stats.blobs[idx];
     let delta_filepath = filepath(&blob.store_hash);
     let tmpfile = NamedTempFile::new_in(&tmpdir())?;
+    let dst_filepath = tmpfile.path();
 
     let sw = Stopwatch::start_new();
 
-    let (_input_meta, dst_meta) = async_std::task::block_on(async {
+    let (_input_meta, dst_meta) = async_std::task::block_on(async move {
         let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
         let input_file = async_std::fs::File::open(&delta_filepath).await?;
-        let dst_file = async_std::fs::File::create(tmpfile.path()).await?;
+        let dst_file = async_std::fs::File::create(dst_filepath).await?;
         delta::delta(
             delta::ProcessMode::Decode,
             &src_file,
