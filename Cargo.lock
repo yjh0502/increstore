@@ -1797,7 +1797,7 @@ dependencies = [
 [[package]]
 name = "xdelta3"
 version = "0.1.5"
-source = "git+https://github.com/yjh0502/xdelta3-rs#0713fd19eed23648d97cd920dc9fad2274fc9853"
+source = "git+https://github.com/yjh0502/xdelta3-rs#df61eb75bdf792645a238ebf10706d547327f6b1"
 dependencies = [
  "bindgen",
  "cc",
