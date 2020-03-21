@@ -288,3 +288,113 @@ where
         w.poll_shutdown(cx)
     }
 }
+
+pub struct MmapBuf {
+    #[allow(unused)]
+    file: std::fs::File,
+    map: memmap::Mmap,
+    offset: usize,
+    len: usize,
+}
+
+impl MmapBuf {
+    pub fn from_path<P: AsRef<std::path::Path>>(path: P) -> io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        let meta = file.metadata()?;
+        let map = unsafe { memmap::Mmap::map(&file)? };
+
+        Ok(Self {
+            file,
+            map,
+            offset: 0,
+            len: meta.len() as usize,
+        })
+    }
+
+    fn remaining(&self) -> usize {
+        self.len - self.offset
+    }
+}
+
+impl futures::io::AsyncRead for MmapBuf {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<futures::io::Result<usize>> {
+        let len = buf.len().min(self.remaining());
+
+        let offset = self.offset;
+        let offset_end = self.offset + len;
+        {
+            let src = &self.map[offset..offset_end];
+            (&mut buf[..len]).copy_from_slice(src);
+        }
+        self.as_mut().offset = offset_end;
+
+        Poll::Ready(Ok(len))
+    }
+}
+
+pub struct MmapBufMut {
+    #[allow(unused)]
+    file: std::fs::File,
+    map: memmap::MmapMut,
+    offset: usize,
+    len: usize,
+}
+
+impl MmapBufMut {
+    #[allow(unused)]
+    pub fn from_path_len<P: AsRef<std::path::Path>>(path: P, len: usize) -> io::Result<Self> {
+        use std::fs::*;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
+        file.set_len(len as u64)?;
+
+        let map = unsafe { memmap::MmapMut::map_mut(&file).expect("MmapMut::map_mut") };
+
+        Ok(Self {
+            file,
+            map,
+            offset: 0,
+            len,
+        })
+    }
+
+    fn remaining(&self) -> usize {
+        self.len - self.offset
+    }
+}
+
+impl futures::io::AsyncWrite for MmapBufMut {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<futures::io::Result<usize>> {
+        let len = buf.len().min(self.remaining());
+
+        let offset = self.offset;
+        let offset_end = self.offset + len;
+        {
+            let mut s = self.as_mut();
+            (&mut s.map[offset..offset_end]).copy_from_slice(&buf[..len]);
+            s.offset = offset_end;
+        }
+
+        Poll::Ready(Ok(len))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<futures::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<futures::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}

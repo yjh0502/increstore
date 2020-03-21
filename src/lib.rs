@@ -708,16 +708,20 @@ fn validate_blob_delta<P: AsRef<Path>>(
         })?
     } else {
         async_std::task::block_on(async move {
-            let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
-            let input_file = async_std::fs::File::open(&delta_filepath).await?;
-            let dst_file = async_std::fs::File::create(dst_filepath).await?;
-            delta::delta(
-                delta::ProcessMode::Decode,
-                &src_file,
-                &input_file,
-                &dst_file,
-            )
-            .await
+            if false {
+                // async_std based
+                let input_file = async_std::fs::File::open(&delta_filepath).await?;
+                let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
+                let dst_file = async_std::fs::File::create(dst_filepath).await?;
+                delta::delta(delta::ProcessMode::Decode, src_file, input_file, dst_file).await
+            } else {
+                // mmap based
+                let input_file = rw::MmapBuf::from_path(&delta_filepath)?;
+                let src_file = rw::MmapBuf::from_path(src_filepath)?;
+                let dst_file =
+                    rw::MmapBufMut::from_path_len(dst_filepath, blob.content_size as usize)?;
+                delta::delta(delta::ProcessMode::Decode, src_file, input_file, dst_file).await
+            }
         })?
     };
 
