@@ -403,3 +403,23 @@ impl futures::io::AsyncWrite for MmapBufMut {
         Poll::Ready(Ok(()))
     }
 }
+
+pub struct Null;
+
+impl futures::AsyncWrite for Null {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<futures::io::Result<usize>> {
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<futures::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<futures::io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+}
