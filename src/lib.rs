@@ -724,9 +724,11 @@ where
         })?
     };
 
+    let throughput = 1000 * dst_meta.len() / sw.elapsed_ms() as u64;
     debug!(
-        "validate took={}ms filename={}",
+        "validate took={}ms {}/s filename={}",
         sw.elapsed_ms(),
+        bytesize::ByteSize(throughput),
         blob.filename
     );
 
