@@ -628,65 +628,36 @@ fn validate_blob_children<P: AsRef<Path>>(
     src_filepath: P,
     stats: &Stats,
 ) -> Result<()> {
-    // let children = stats.children(parent_idx, true);
-    // validate_blob_children_par(&children, src_filepath, stats)
-
     let mut children = stats.children(parent_idx, true);
     children.sort_by_key(|idx| stats.depths[*idx].child_count);
 
     let last = children.pop();
     for child_idx in children {
-        let child_count = stats.depths[child_idx].child_count;
-        if child_count == 1 {
-            validate_blob_delta_null(child_idx, &src_filepath, &stats)?;
-        } else {
-            let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
-            validate_blob_children(child_idx, tmpfile, stats)?;
-        }
+        validate_blob_children0(child_idx, &src_filepath, stats)?;
     }
 
     if let Some(child_idx) = last {
-        let child_count = stats.depths[child_idx].child_count;
-        if child_count == 1 {
-            validate_blob_delta_null(child_idx, &src_filepath, &stats)?;
-        } else {
-            // drop src_filepath (probably NamedTempFile itself) while handling last child
-            let tmpfile = validate_blob_delta(child_idx, src_filepath, &stats)?;
-            validate_blob_children(child_idx, tmpfile, stats)?;
-        }
+        // drop src_filepath (probably NamedTempFile itself) while handling last child
+        validate_blob_children0(child_idx, src_filepath, stats)?;
     }
     Ok(())
 }
 
-#[allow(unused)]
-fn validate_blob_children_par<P: AsRef<Path>>(
-    children_indices: &[usize],
+fn validate_blob_children0<P: AsRef<Path>>(
+    child_idx: usize,
     src_filepath: P,
     stats: &Stats,
 ) -> Result<()> {
-    let len = children_indices.len();
-    match len {
-        0 => Ok(()),
-        1 => {
-            let child_idx = children_indices[0];
-            let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
-            validate_blob_children(child_idx, tmpfile, stats)
-        }
-        _ => {
-            let mid = children_indices.len() / 2;
-            let slice0 = &children_indices[..mid];
-            let slice1 = &children_indices[mid..];
-
-            let path = src_filepath.as_ref();
-            let (r0, r1) = rayon::join(
-                || validate_blob_children_par(slice0, path, stats),
-                || validate_blob_children_par(slice1, path, stats),
-            );
-            r0?;
-            r1?;
-            Ok(())
-        }
+    let child_count = stats.depths[child_idx].child_count;
+    if child_count == 1 {
+        // leaf node
+        validate_blob_delta_null(child_idx, &src_filepath, &stats)?;
+    } else {
+        // non-leaf node
+        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
+        validate_blob_children(child_idx, tmpfile, stats)?;
     }
+    Ok(())
 }
 
 fn validate_blob_delta<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<NamedTempFile>
