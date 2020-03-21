@@ -56,8 +56,6 @@ checksum = "e1ba68f4276a778591e36a0c348a269888f3a177c8d2054969389e3b59611ff5"
 [[package]]
 name = "async-std"
 version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "538ecb01eb64eecd772087e5b6f7540cbc917f047727339a472dafed2185b267"
 dependencies = [
  "async-task",
  "crossbeam-channel",
@@ -76,6 +74,7 @@ dependencies = [
  "pin-project-lite",
  "pin-utils",
  "slab",
+ "threadpool",
 ]
 
 [[package]]
@@ -1598,6 +1597,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "threadpool"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2f0c90a5f3459330ac8bc0d2f879c693bb7a2f59689c1083fc4ef83834da865"
+dependencies = [
+ "num_cpus",
+]
+
+[[package]]
 name = "time"
 version = "0.1.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1797,7 +1805,6 @@ dependencies = [
 [[package]]
 name = "xdelta3"
 version = "0.1.5"
-source = "git+https://github.com/yjh0502/xdelta3-rs#df61eb75bdf792645a238ebf10706d547327f6b1"
 dependencies = [
  "bindgen",
  "cc",

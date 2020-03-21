@@ -691,18 +691,35 @@ fn validate_blob_delta<P: AsRef<Path>>(
 
     let sw = Stopwatch::start_new();
 
-    let (_input_meta, dst_meta) = async_std::task::block_on(async move {
-        let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
-        let input_file = async_std::fs::File::open(&delta_filepath).await?;
-        let dst_file = async_std::fs::File::create(dst_filepath).await?;
-        delta::delta(
-            delta::ProcessMode::Decode,
-            &src_file,
-            &input_file,
-            &dst_file,
-        )
-        .await
-    })?;
+    let (_input_meta, dst_meta) = if false {
+        let mut rt = tokio::runtime::Runtime::new().unwrap();
+
+        rt.block_on(async move {
+            let src_file = tokio::fs::File::open(src_filepath.as_ref()).await?;
+            let input_file = tokio::fs::File::open(&delta_filepath).await?;
+            let dst_file = tokio::fs::File::create(dst_filepath).await?;
+            delta::delta(
+                delta::ProcessMode::Decode,
+                Compat::new(src_file),
+                Compat::new(input_file),
+                Compat::new(dst_file),
+            )
+            .await
+        })?
+    } else {
+        async_std::task::block_on(async move {
+            let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
+            let input_file = async_std::fs::File::open(&delta_filepath).await?;
+            let dst_file = async_std::fs::File::create(dst_filepath).await?;
+            delta::delta(
+                delta::ProcessMode::Decode,
+                &src_file,
+                &input_file,
+                &dst_file,
+            )
+            .await
+        })?
+    };
 
     debug!(
         "validate took={}ms filename={}",
