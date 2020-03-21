@@ -252,7 +252,7 @@ impl<T> Compat<T> {
     }
 }
 
-impl<T> futures::io::AsyncRead for Compat<T>
+impl<T> futures::AsyncRead for Compat<T>
 where
     T: tokio::io::AsyncRead + Unpin,
 {
@@ -267,7 +267,7 @@ where
     }
 }
 
-impl<T> futures::io::AsyncWrite for Compat<T>
+impl<T> futures::AsyncWrite for Compat<T>
 where
     T: tokio::io::AsyncWrite + Unpin,
 {
@@ -321,7 +321,7 @@ impl MmapBuf {
     }
 }
 
-impl futures::io::AsyncRead for MmapBuf {
+impl futures::AsyncRead for MmapBuf {
     fn poll_read(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -376,7 +376,7 @@ impl MmapBufMut {
     }
 }
 
-impl futures::io::AsyncWrite for MmapBufMut {
+impl futures::AsyncWrite for MmapBufMut {
     fn poll_write(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
