@@ -49,6 +49,10 @@ impl WriteMetadata {
         }
         s
     }
+
+    pub fn len(&self) -> u64 {
+        self.size
+    }
 }
 
 pub struct HashRW<W> {

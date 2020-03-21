@@ -679,11 +679,10 @@ fn validate_blob_children_par<P: AsRef<Path>>(
     }
 }
 
-fn validate_blob_delta<P: AsRef<Path>>(
-    idx: usize,
-    src_filepath: P,
-    stats: &Stats,
-) -> Result<NamedTempFile> {
+fn validate_blob_delta<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<NamedTempFile>
+where
+    P: AsRef<Path>,
+{
     let blob = &stats.blobs[idx];
     let delta_filepath = filepath(&blob.store_hash);
     let tmpfile = NamedTempFile::new_in(&tmpdir())?;
@@ -732,6 +731,7 @@ fn validate_blob_delta<P: AsRef<Path>>(
     );
 
     assert_eq!(blob.content_hash, dst_meta.digest());
+    assert_eq!(blob.content_size, dst_meta.len());
 
     Ok(tmpfile)
 }
