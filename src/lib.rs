@@ -2,6 +2,7 @@ use std::io;
 use std::path::*;
 
 use async_std::task::block_on;
+use futures::prelude::*;
 use log::*;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
@@ -616,67 +617,90 @@ pub fn validate() -> Result<()> {
 }
 
 pub fn validate_blob_root(idx: usize, stats: Stats) -> Result<()> {
-    let blob = &stats.blobs[idx];
-
-    let src_filepath = filepath(&blob.store_hash);
-    validate_blob_children(0, &src_filepath, &stats)?;
+    let stats = Arc::new(stats);
+    let src_filepath = filepath(&stats.blobs[idx].store_hash);
+    block_on(validate_blob_children(0, src_filepath, stats))?;
 
     Ok(())
 }
 
-fn validate_blob_children<P: AsRef<Path>>(
+async fn validate_blob_children<P>(
     parent_idx: usize,
     src_filepath: P,
-    stats: &Stats,
-) -> Result<()> {
+    stats: Arc<Stats>,
+) -> Result<()>
+where
+    P: AsRef<Path> + Send + Sync,
+{
     let mut children = stats.children(parent_idx, true);
     children.sort_by_key(|idx| stats.child_count(*idx));
 
     let last = children.pop();
+    let src_path_buf = src_filepath.as_ref().to_path_buf();
+    let mut handles = Vec::new();
     for child_idx in children {
-        block_on(validate_blob_children0(child_idx, &src_filepath, stats))?;
+        let f = validate_blob_children0(child_idx, src_path_buf.clone(), stats.clone());
+        if stats.child_count(child_idx) == 1 {
+            handles.push(async_std::task::spawn(f));
+        } else {
+            f.await?;
+        }
+    }
+
+    // wait for all async tasks
+    for handle in handles {
+        handle.await?;
     }
 
     if let Some(child_idx) = last {
         // drop src_filepath (probably NamedTempFile itself) while handling last child
-        block_on(validate_blob_children0(child_idx, src_filepath, stats))?;
+        validate_blob_children0(child_idx, src_filepath, stats).await?;
     }
     Ok(())
 }
 
-async fn validate_blob_children0<P: AsRef<Path>>(
+use futures::future::*;
+fn validate_blob_children0<'a, P>(
     child_idx: usize,
     src_filepath: P,
-    stats: &Stats,
-) -> Result<()> {
+    stats: Arc<Stats>,
+) -> BoxFuture<'a, Result<()>>
+where
+    P: AsRef<Path> + Send + Sync + 'a,
+{
     if stats.child_count(child_idx) == 1 {
         // leaf node
-        validate_blob_delta_null(child_idx, &src_filepath, &stats).await?;
-        Ok(())
+        validate_blob_delta_null(child_idx, src_filepath, stats).boxed()
     } else {
         // non-leaf node
-        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats).await?;
-        validate_blob_children(child_idx, tmpfile, stats)?;
-        Ok(())
+        let f = async move {
+            let tmpfile = validate_blob_delta(child_idx, src_filepath, stats.clone()).await?;
+            validate_blob_children(child_idx, tmpfile, stats).await
+        };
+        f.boxed()
     }
 }
 
-async fn validate_blob_delta<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<NamedTempFile>
+async fn validate_blob_delta<P>(
+    idx: usize,
+    src_filepath: P,
+    stats: Arc<Stats>,
+) -> Result<NamedTempFile>
 where
     P: AsRef<Path>,
 {
     let dst_file = NamedTempFile::new_in(&tmpdir())?;
-    let dst_file = validate_blob_delta0(idx, src_filepath, stats, Some(dst_file))
+    let dst_file = validate_blob_delta0(idx, src_filepath, &stats, Some(dst_file))
         .await?
         .unwrap();
     Ok(dst_file)
 }
 
-async fn validate_blob_delta_null<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<()>
+async fn validate_blob_delta_null<P>(idx: usize, src_filepath: P, stats: Arc<Stats>) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    validate_blob_delta0(idx, src_filepath, stats, None).await?;
+    validate_blob_delta0(idx, src_filepath, &stats, None).await?;
     Ok(())
 }
 

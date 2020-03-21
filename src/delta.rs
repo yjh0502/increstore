@@ -21,6 +21,7 @@ where
         .source_window_size(100_000_000)
         .no_compress(true)
         .level(0);
+
     xdelta3::stream::process_async(cfg, op, &mut input_reader, src_reader, &mut dst).await?;
 
     let input_meta = input_reader.meta();
