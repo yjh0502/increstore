@@ -683,45 +683,42 @@ fn validate_blob_delta<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<
 where
     P: AsRef<Path>,
 {
+    let dst_file = NamedTempFile::new_in(&tmpdir())?;
+    async_std::task::block_on(async {
+        validate_blob_delta0(idx, src_filepath, stats, &dst_file).await
+    })?;
+    Ok(dst_file)
+}
+
+async fn validate_blob_delta0<P>(
+    idx: usize,
+    src_filepath: P,
+    stats: &Stats,
+    dst_file: &NamedTempFile,
+) -> Result<()>
+where
+    P: AsRef<Path>,
+{
     let blob = &stats.blobs[idx];
     let delta_filepath = filepath(&blob.store_hash);
-    let tmpfile = NamedTempFile::new_in(&tmpdir())?;
-    let dst_filepath = tmpfile.path();
+    let dst_filepath = dst_file.path();
 
     let sw = Stopwatch::start_new();
 
-    let (_input_meta, dst_meta) = if false {
-        let mut rt = tokio::runtime::Runtime::new().unwrap();
-
-        rt.block_on(async move {
-            let src_file = tokio::fs::File::open(src_filepath.as_ref()).await?;
-            let input_file = tokio::fs::File::open(&delta_filepath).await?;
-            let dst_file = tokio::fs::File::create(dst_filepath).await?;
-            delta::delta(
-                delta::ProcessMode::Decode,
-                Compat::new(src_file),
-                Compat::new(input_file),
-                Compat::new(dst_file),
-            )
-            .await
-        })?
-    } else {
-        async_std::task::block_on(async move {
-            if false {
-                // async_std based
-                let input_file = async_std::fs::File::open(&delta_filepath).await?;
-                let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
-                let dst_file = async_std::fs::File::create(dst_filepath).await?;
-                delta::delta(delta::ProcessMode::Decode, src_file, input_file, dst_file).await
-            } else {
-                // mmap based
-                let input_file = rw::MmapBuf::from_path(&delta_filepath)?;
-                let src_file = rw::MmapBuf::from_path(src_filepath)?;
-                let dst_file =
-                    rw::MmapBufMut::from_path_len(dst_filepath, blob.content_size as usize)?;
-                delta::delta(delta::ProcessMode::Decode, src_file, input_file, dst_file).await
-            }
-        })?
+    let (_input_meta, dst_meta) = {
+        if false {
+            // async_std based
+            let input_file = async_std::fs::File::open(&delta_filepath).await?;
+            let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
+            let dst_file = async_std::fs::File::create(dst_filepath).await?;
+            delta::delta(delta::ProcessMode::Decode, src_file, input_file, dst_file).await?
+        } else {
+            // mmap based
+            let input_file = rw::MmapBuf::from_path(&delta_filepath)?;
+            let src_file = rw::MmapBuf::from_path(src_filepath)?;
+            let dst_file = rw::MmapBufMut::from_path_len(dst_filepath, blob.content_size as usize)?;
+            delta::delta(delta::ProcessMode::Decode, src_file, input_file, dst_file).await?
+        }
     };
 
     let throughput = 1000 * dst_meta.len() / sw.elapsed_ms() as u64;
@@ -735,7 +732,7 @@ where
     assert_eq!(blob.content_hash, dst_meta.digest());
     assert_eq!(blob.content_size, dst_meta.len());
 
-    Ok(tmpfile)
+    Ok(())
 }
 
 fn file_hash(filename: &str) -> Result<String> {

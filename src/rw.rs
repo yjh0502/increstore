@@ -246,6 +246,7 @@ pub struct Compat<T> {
 }
 
 impl<T> Compat<T> {
+    #[allow(unused)]
     pub fn new(w: T) -> Self {
         Self { w }
     }
