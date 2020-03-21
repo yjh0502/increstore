@@ -1,6 +1,7 @@
 use std::io;
 use std::path::*;
 
+use async_std::task::block_on;
 use log::*;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
@@ -127,7 +128,7 @@ pub fn get(filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
         let delta_filepath = filepath(&delta_blob.store_hash);
         debug!("decode filename={}", delta_blob.filename);
         debug!("trace={:?}, input={:?}", src_filepath, delta_filepath);
-        let (_input_meta, dst_meta) = async_std::task::block_on(async {
+        let (_input_meta, dst_meta) = block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
             let input_file = async_std::fs::File::open(&delta_filepath).await?;
             let dst_file = async_std::fs::File::create(tmpfile.path()).await?;
@@ -282,7 +283,7 @@ fn append_zip_delta(
         let src_hash = &src_blob.content_hash;
         let src_filepath = filepath(src_hash);
 
-        let res = async_std::task::block_on(async {
+        let res = block_on(async {
             let src_file = async_std::fs::File::open(&src_filepath).await?;
             let input_file = async_std::fs::File::open(&input_filepath).await?;
             let dst_file = async_std::fs::File::create(tmp_path.path()).await?;
@@ -629,55 +630,53 @@ fn validate_blob_children<P: AsRef<Path>>(
     stats: &Stats,
 ) -> Result<()> {
     let mut children = stats.children(parent_idx, true);
-    children.sort_by_key(|idx| stats.depths[*idx].child_count);
+    children.sort_by_key(|idx| stats.child_count(*idx));
 
     let last = children.pop();
     for child_idx in children {
-        validate_blob_children0(child_idx, &src_filepath, stats)?;
+        block_on(validate_blob_children0(child_idx, &src_filepath, stats))?;
     }
 
     if let Some(child_idx) = last {
         // drop src_filepath (probably NamedTempFile itself) while handling last child
-        validate_blob_children0(child_idx, src_filepath, stats)?;
+        block_on(validate_blob_children0(child_idx, src_filepath, stats))?;
     }
     Ok(())
 }
 
-fn validate_blob_children0<P: AsRef<Path>>(
+async fn validate_blob_children0<P: AsRef<Path>>(
     child_idx: usize,
     src_filepath: P,
     stats: &Stats,
 ) -> Result<()> {
-    let child_count = stats.depths[child_idx].child_count;
-    if child_count == 1 {
+    if stats.child_count(child_idx) == 1 {
         // leaf node
-        validate_blob_delta_null(child_idx, &src_filepath, &stats)?;
+        validate_blob_delta_null(child_idx, &src_filepath, &stats).await?;
+        Ok(())
     } else {
         // non-leaf node
-        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats)?;
+        let tmpfile = validate_blob_delta(child_idx, &src_filepath, &stats).await?;
         validate_blob_children(child_idx, tmpfile, stats)?;
+        Ok(())
     }
-    Ok(())
 }
 
-fn validate_blob_delta<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<NamedTempFile>
+async fn validate_blob_delta<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<NamedTempFile>
 where
     P: AsRef<Path>,
 {
     let dst_file = NamedTempFile::new_in(&tmpdir())?;
-    async_std::task::block_on(async {
-        validate_blob_delta0(idx, src_filepath, stats, Some(&dst_file)).await
-    })?;
+    let dst_file = validate_blob_delta0(idx, src_filepath, stats, Some(dst_file))
+        .await?
+        .unwrap();
     Ok(dst_file)
 }
 
-fn validate_blob_delta_null<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<()>
+async fn validate_blob_delta_null<P>(idx: usize, src_filepath: P, stats: &Stats) -> Result<()>
 where
     P: AsRef<Path>,
 {
-    async_std::task::block_on(async {
-        validate_blob_delta0(idx, src_filepath, stats, None).await
-    })?;
+    validate_blob_delta0(idx, src_filepath, stats, None).await?;
     Ok(())
 }
 
@@ -685,8 +684,8 @@ async fn validate_blob_delta0<P>(
     idx: usize,
     src_filepath: P,
     stats: &Stats,
-    dst_file: Option<&NamedTempFile>,
-) -> Result<()>
+    dst_file: Option<NamedTempFile>,
+) -> Result<Option<NamedTempFile>>
 where
     P: AsRef<Path>,
 {
@@ -703,7 +702,7 @@ where
             let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
 
             match dst_file {
-                Some(file) => {
+                Some(ref file) => {
                     let dst_file = async_std::fs::File::create(file.path()).await?;
                     delta::delta(mode, src_file, input_file, dst_file).await?
                 }
@@ -715,7 +714,7 @@ where
             let src_file = rw::MmapBuf::from_path(src_filepath)?;
 
             match dst_file {
-                Some(file) => {
+                Some(ref file) => {
                     let dst_file =
                         rw::MmapBufMut::from_path_len(file.path(), blob.content_size as usize)?;
                     delta::delta(mode, src_file, input_file, dst_file).await?
@@ -736,7 +735,7 @@ where
     assert_eq!(blob.content_hash, dst_meta.digest());
     assert_eq!(blob.content_size, dst_meta.len());
 
-    Ok(())
+    Ok(dst_file)
 }
 
 fn file_hash(filename: &str) -> Result<String> {

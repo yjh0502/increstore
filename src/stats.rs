@@ -67,6 +67,10 @@ impl Stats {
         }
     }
 
+    pub fn child_count(&self, idx: usize) -> usize {
+        self.depths[idx].child_count
+    }
+
     fn add_blob(&mut self, blob: &Blob) {
         match &blob.parent_hash {
             None => {
