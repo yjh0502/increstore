@@ -331,7 +331,7 @@ impl Stats {
                 bucket.pop();
             }
 
-            writeln!(s, "## depth ditribution").ok();
+            writeln!(s, "## depth distrubution").ok();
             for (i, count) in bucket.into_iter().enumerate() {
                 let (start, end) = if i == 0 {
                     (0, 0)
