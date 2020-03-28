@@ -20,6 +20,8 @@ enum MySubCommandEnum {
     Dedytrate(SubCommandDehydrate),
     Hydrate(SubCommandHydrate),
 
+    Archive(SubCommandArchive),
+
     ImportUrls(SubCommandImportUrls),
     Validate(SubCommandValidate),
 
@@ -79,9 +81,17 @@ struct SubCommandExists {
 struct SubCommandDehydrate {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// dehydrate
+/// hydrate
 #[argh(subcommand, name = "hydrate")]
 struct SubCommandHydrate {}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// archive
+#[argh(subcommand, name = "archive")]
+struct SubCommandArchive {
+    #[argh(positional)]
+    filename: String,
+}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// import-urls
@@ -169,6 +179,8 @@ fn main() -> Result<()> {
 
         MySubCommandEnum::Dedytrate(_cmd) => dehydrate(),
         MySubCommandEnum::Hydrate(_cmd) => hydrate(),
+
+        MySubCommandEnum::Archive(cmd) => archive(&cmd.filename),
 
         MySubCommandEnum::ImportUrls(cmd) => import_urls(&cmd.filename),
         MySubCommandEnum::Validate(_cmd) => validate(),

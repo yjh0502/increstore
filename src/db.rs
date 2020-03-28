@@ -22,9 +22,13 @@ impl Blob {
     pub fn is_root(&self) -> bool {
         self.parent_hash.is_none()
     }
+    pub fn is_genesis(&self) -> bool {
+        // sqlite ROWID starts from 1
+        self.id == 1
+    }
 }
 
-fn dbpath() -> String {
+pub fn dbpath() -> String {
     format!("{}/meta.db", prefix())
 }
 

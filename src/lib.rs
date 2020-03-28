@@ -212,6 +212,63 @@ pub fn hydrate() -> Result<()> {
     Ok(())
 }
 
+fn archive_add_file<W>(ar: &mut tar::Builder<W>, path: &str) -> Result<()>
+where
+    W: std::io::Write,
+{
+    let meta = std::fs::metadata(path)?;
+    let size = meta.len();
+
+    let mut header = tar::Header::new_gnu();
+    let strip_path = Path::new(path)
+        .strip_prefix(&prefix())
+        .expect("invalid file");
+    header.set_path(strip_path)?;
+    header.set_size(size);
+    header.set_mode(0o644);
+
+    if let Ok(time) = meta.modified() {
+        if let Ok(duration) = time.duration_since(std::time::SystemTime::UNIX_EPOCH) {
+            header.set_mtime(duration.as_secs());
+        }
+    }
+
+    header.set_cksum();
+
+    debug!("add file name={:?}, size={}", strip_path, size);
+
+    let file = std::fs::File::open(path)?;
+    ar.append(&header, file)?;
+    Ok(())
+}
+
+fn archive0<W>(w: W) -> Result<()>
+where
+    W: std::io::Write,
+{
+    let mut ar = tar::Builder::new(w);
+    archive_add_file(&mut ar, &db::dbpath())?;
+
+    let blobs = db::all()?;
+    for blob in blobs {
+        if blob.is_genesis() || !blob.is_root() {
+            archive_add_file(&mut ar, &filepath(&blob.store_hash))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn archive(filename: &str) -> Result<()> {
+    if filename != "-" {
+        let file = std::fs::File::create(filename)?;
+        archive0(file)
+    } else {
+        let stdout = std::io::stdout();
+        let out = stdout.lock();
+        archive0(out)
+    }
+}
+
 pub fn cleanup() -> Result<()> {
     let blobs = db::all()?;
     let stats = Stats::from_blobs(blobs);
@@ -502,11 +559,12 @@ pub fn debug_graph(filename: &str) -> Result<()> {
 
 pub fn debug_list_files(genesis: bool, roots: bool, non_roots: bool, long: bool) -> Result<()> {
     let blobs = db::all()?;
-    for (idx, blob) in blobs.into_iter().enumerate() {
+    for blob in blobs.into_iter() {
         let is_root = blob.is_root();
 
         // TODO: better genesis check?
-        let should_print = (roots && is_root) || (non_roots && !is_root) || (genesis && idx == 0);
+        let should_print =
+            (roots && is_root) || (non_roots && !is_root) || (genesis && blob.is_genesis());
 
         if !should_print {
             continue;
