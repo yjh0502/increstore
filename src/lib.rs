@@ -167,6 +167,14 @@ pub fn exists(filename: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn rename(from_filename: &str, to_filename: &str) -> Result<()> {
+    let renamed = db::rename(from_filename, to_filename)?;
+    if !renamed {
+        error!("file not exists: {}", from_filename);
+    }
+    Ok(())
+}
+
 pub fn dehydrate() -> Result<()> {
     let blobs = db::all()?;
     let stats = Stats::from_blobs(blobs);

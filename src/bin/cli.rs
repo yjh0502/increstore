@@ -15,6 +15,8 @@ enum MySubCommandEnum {
     Get(SubCommandGet),
     Exists(SubCommandExists),
 
+    Rename(SubCommandRename),
+
     Dedytrate(SubCommandDehydrate),
     Hydrate(SubCommandHydrate),
 
@@ -51,6 +53,16 @@ struct SubCommandGet {
 
     #[argh(description = "dry-run", switch)]
     dry_run: bool,
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// rename
+#[argh(subcommand, name = "rename")]
+struct SubCommandRename {
+    #[argh(positional)]
+    from_filename: String,
+    #[argh(positional)]
+    to_filename: String,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -152,6 +164,8 @@ fn main() -> Result<()> {
         MySubCommandEnum::Push(cmd) => push_zip(&cmd.filename),
         MySubCommandEnum::Get(cmd) => get(&cmd.filename, &cmd.out_filename, cmd.dry_run),
         MySubCommandEnum::Exists(cmd) => exists(&cmd.filename),
+
+        MySubCommandEnum::Rename(cmd) => rename(&cmd.from_filename, &cmd.to_filename),
 
         MySubCommandEnum::Dedytrate(_cmd) => dehydrate(),
         MySubCommandEnum::Hydrate(_cmd) => hydrate(),

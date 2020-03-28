@@ -176,6 +176,18 @@ insert or ignore into blobs (
     Ok(inserted > 0)
 }
 
+pub fn rename(from_filename: &str, to_filename: &str) -> Result<bool> {
+    let conn = Connection::open(dbpath())?;
+
+    let updated = conn.execute(
+        r#"
+    update blobs set filename = ?2 where filename = ?1
+    "#,
+        params![from_filename, to_filename],
+    )?;
+    Ok(updated > 0)
+}
+
 pub fn remove(blob: &Blob) -> Result<()> {
     let conn = Connection::open(dbpath())?;
 
