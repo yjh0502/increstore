@@ -1,4 +1,5 @@
 use crate::db::Blob;
+use bytesize::ByteSize;
 use log::*;
 
 pub struct RootBlob<'a> {
@@ -238,7 +239,6 @@ impl Stats {
     }
 
     pub fn size_info(&self) -> String {
-        use bytesize::ByteSize;
         use std::fmt::Write;
 
         let mut s = String::new();
@@ -315,33 +315,70 @@ impl Stats {
 
         // depth
         {
-            let len = self.depths.len();
-
-            let bucket_size = (len.next_power_of_two().trailing_zeros() as usize) + 1;
-            let mut bucket = Vec::with_capacity(bucket_size);
-            bucket.resize(bucket_size, 0);
-
-            for i in 0..len {
-                let depth = self.depths[i].depth;
-                let bucket_idx = depth.next_power_of_two().trailing_zeros() as usize;
-                bucket[bucket_idx] += 1;
+            let mut hist = Histogram::default();
+            for depth in &self.depths {
+                hist.add(depth.depth);
             }
 
-            while let Some(0) = bucket.last().clone() {
-                bucket.pop();
+            writeln!(s, "## depth distribution").ok();
+            writeln!(s, "{}", hist.print()).ok();
+
+            let mut hist_size = Histogram::default();
+            for blob in &self.blobs {
+                if blob.is_root() {
+                    continue;
+                }
+
+                hist_size.add(blob.store_size as usize);
             }
 
-            writeln!(s, "## depth distrubution").ok();
-            for (i, count) in bucket.into_iter().enumerate() {
-                let (start, end) = if i == 0 {
-                    (0, 0)
-                } else {
-                    (1 << (i - 1), (1 << i) - 1)
-                };
-                writeln!(s, "{:3}~{:3} = {}", start, end, count).ok();
-            }
+            writeln!(s, "## size distribution").ok();
+            writeln!(s, "{}", hist_size.print()).ok();
         }
 
+        s
+    }
+}
+
+#[derive(Default)]
+struct Histogram {
+    bucket: Vec<usize>,
+}
+impl Histogram {
+    fn add(&mut self, val: usize) {
+        let bucket_idx = val.next_power_of_two().trailing_zeros() as usize;
+        while self.bucket.len() <= bucket_idx {
+            self.bucket.push(0);
+        }
+        self.bucket[bucket_idx] += 1;
+    }
+
+    fn print(&self) -> String {
+        use std::fmt::Write;
+
+        let mut s = String::new();
+        let mut trim_start = true;
+
+        for (i, count) in self.bucket.iter().enumerate() {
+            let count = *count;
+            if trim_start && count == 0 {
+                continue;
+            }
+            trim_start = false;
+            let (start, end) = if i == 0 {
+                (0, 0)
+            } else {
+                (1 << (i - 1), (1 << i) - 1)
+            };
+            writeln!(
+                s,
+                "{:>9} - {:>9}| {}",
+                format!("{}", ByteSize(start)),
+                format!("{}", ByteSize(end)),
+                count
+            )
+            .ok();
+        }
         s
     }
 }
