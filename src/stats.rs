@@ -316,11 +316,13 @@ impl Stats {
         // depth
         {
             let mut hist = Histogram::default();
+            let mut max_depth = 0;
             for depth in &self.depths {
                 hist.add(depth.depth);
+                max_depth = max_depth.max(depth.depth);
             }
 
-            writeln!(s, "## depth distribution").ok();
+            writeln!(s, "## depth distribution (max={})", max_depth).ok();
             writeln!(s, "{}", hist.print()).ok();
 
             let mut hist_size = Histogram::default();
