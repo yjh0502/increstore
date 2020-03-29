@@ -137,11 +137,11 @@ impl Stats {
         for blob_idx in aliases {
             let blob = &self.blobs[blob_idx];
             if blob.is_root() {
-                return format!("B{}", blob_idx);
+                return format!("V{}", blob.id);
             }
         }
-        //
-        format!("B{}", idx)
+        let blob = &self.blobs[idx];
+        format!("V{}", blob.id)
     }
 
     pub fn children_all(&self, idx: usize) -> Vec<usize> {
