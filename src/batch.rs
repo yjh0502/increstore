@@ -1,4 +1,4 @@
-use crate::{db, push_zip, Result};
+use crate::{db, push, FileType, Result};
 use log::*;
 use stopwatch::Stopwatch;
 
@@ -67,7 +67,7 @@ pub fn import_urls(url_file: &str) -> Result<()> {
     let stream = stream::iter(f_list)
         .buffered(4)
         .and_then(|filename| {
-            pool.spawn_with_handle(async move { push_zip(&filename) })
+            pool.spawn_with_handle(async move { push(&filename, FileType::Zip) })
                 .expect("spawn_with_handle")
         })
         .try_collect::<Vec<_>>();

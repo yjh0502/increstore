@@ -41,6 +41,11 @@ enum MySubCommandEnum {
 struct SubCommandPush {
     #[argh(positional)]
     filename: String,
+
+    #[argh(description = "zip", switch)]
+    is_zip: bool,
+    #[argh(description = "gz", switch)]
+    is_gz: bool,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -171,7 +176,20 @@ fn main() -> Result<()> {
     let up: TopLevel = argh::from_env();
 
     match up.nested {
-        MySubCommandEnum::Push(cmd) => push_zip(&cmd.filename),
+        MySubCommandEnum::Push(cmd) => {
+            let ty = match (cmd.is_zip, cmd.is_gz) {
+                (true, true) => {
+                    panic!("should not specify both zip and gz");
+                }
+                (true, false) => FileType::Zip,
+                (false, true) => FileType::Gz,
+                (false, false) => {
+                    // default
+                    FileType::Zip
+                }
+            };
+            push(&cmd.filename, ty)
+        }
         MySubCommandEnum::Get(cmd) => get(&cmd.filename, &cmd.out_filename, cmd.dry_run),
         MySubCommandEnum::Exists(cmd) => exists(&cmd.filename),
 

@@ -12,6 +12,7 @@ use thiserror::Error;
 mod batch;
 pub mod db;
 mod delta;
+mod gz;
 mod rw;
 mod stats;
 mod validate;
@@ -40,6 +41,12 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone, Copy)]
+pub enum FileType {
+    Zip,
+    Gz,
+}
 
 pub fn max_root_blobs() -> usize {
     5
@@ -306,7 +313,10 @@ pub fn cleanup() -> Result<()> {
     Ok(())
 }
 
-fn store_zip_blob(input_filepath: &str) -> Result<Blob> {
+fn store_blob<F>(input_filepath: &str, f: F) -> Result<Blob>
+where
+    F: FnOnce(&Path, &Path) -> std::io::Result<WriteMetadata>,
+{
     let input_filename = Path::new(&input_filepath)
         .file_name()
         .unwrap()
@@ -316,7 +326,7 @@ fn store_zip_blob(input_filepath: &str) -> Result<Blob> {
     let tmp_dir = tmpdir();
     let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
 
-    let meta = store_zip(input_filepath, tmp_unzip_path.path(), true)?;
+    let meta = f(Path::new(input_filepath), tmp_unzip_path.path())?;
 
     let input_blob = meta.blob(input_filename);
     let store_filepath = filepath(&input_blob.store_hash);
@@ -324,10 +334,13 @@ fn store_zip_blob(input_filepath: &str) -> Result<Blob> {
     Ok(input_blob)
 }
 
-fn append_zip_full(input_filepath: &str) -> Result<Option<Blob>> {
-    trace!("append_zip_full: input_filepath={}", input_filepath);
+fn append_full(input_filepath: &str, ty: FileType) -> Result<Option<Blob>> {
+    trace!("append_full: input_filepath={} ty={:?}", input_filepath, ty);
 
-    let blob = store_zip_blob(input_filepath)?;
+    let blob = match ty {
+        FileType::Zip => store_blob(input_filepath, |p1, p2| store_zip(p1, p2, true))?,
+        FileType::Gz => store_blob(input_filepath, |p1, p2| gz::store_gz(p1, p2))?,
+    };
     if db::insert(&blob)? {
         Ok(Some(blob))
     } else {
@@ -337,7 +350,7 @@ fn append_zip_full(input_filepath: &str) -> Result<Option<Blob>> {
 
 use std::sync::{atomic::AtomicUsize, Arc};
 
-fn append_zip_delta(
+fn append_delta(
     input_blob: &Blob,
     src_blob: &Blob,
     race: Arc<AtomicUsize>,
@@ -385,7 +398,7 @@ fn append_zip_delta(
         );
         if !update_blob(tmp_path, &blob)? {
             info!(
-                "append_zip_delta: failed to insert, store_hash={}",
+                "append_delta: failed to insert, store_hash={}",
                 blob.store_hash
             );
             return Ok(None);
@@ -395,7 +408,7 @@ fn append_zip_delta(
     let dt_store_delta = sw.elapsed_ms();
 
     info!(
-        "append_zip_delta: ratio={:.02}%, dt_store_delta={}ms",
+        "append_delta: ratio={:.02}%, dt_store_delta={}ms",
         blob.compression_ratio() * 100.0,
         dt_store_delta,
     );
@@ -410,23 +423,23 @@ fn ratio_summary(blobs: &[Blob]) -> String {
     s
 }
 
-pub fn push_zip(input_filepath: &str) -> Result<()> {
-    debug!("append_zip: input_filepath={}", input_filepath);
+pub fn push(input_filepath: &str, ty: FileType) -> Result<()> {
+    debug!("push: input_filepath={}", input_filepath);
 
     let root_blobs = db::roots()?;
 
     let sw = Stopwatch::start_new();
-    let input_blob = match append_zip_full(input_filepath)? {
+    let input_blob = match append_full(input_filepath, ty)? {
         Some(blob) => blob,
         None => {
-            info!("append_zip: content already exists, skipping");
+            info!("push: content already exists, skipping");
             return Ok(());
         }
     };
-    info!("append_zip: dt_store_zip={}ms", sw.elapsed_ms(),);
+    info!("push: dt_store_zip={}ms", sw.elapsed_ms(),);
 
     if root_blobs.is_empty() {
-        info!("append_zip: no root blobs: genesis");
+        info!("push: no root blobs: genesis");
         return Ok(());
     }
 
@@ -434,7 +447,7 @@ pub fn push_zip(input_filepath: &str) -> Result<()> {
 
     let link_blobs = root_blobs
         .into_par_iter()
-        .map(|root_blob| append_zip_delta(&input_blob, &root_blob, race.clone()))
+        .map(|root_blob| append_delta(&input_blob, &root_blob, race.clone()))
         .collect::<Result<Vec<_>>>()?;
 
     let mut link_blobs = link_blobs.into_iter().filter_map(|v| v).collect::<Vec<_>>();
