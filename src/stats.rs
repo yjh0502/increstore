@@ -397,15 +397,19 @@ fn calculate_depth(idx: usize, blobs: &[Blob], depths: &mut [GraphNode]) {
             let mut min_depth = blobs.len();
             let mut min_idx = 0;
 
-            for (parent_idx, parent) in blobs.iter().enumerate() {
+            for (other_idx, other) in blobs.iter().enumerate() {
                 // aliases
-                if parent.content_hash == blob.content_hash {
-                    depths[idx].alias_indices.push(parent_idx);
+                if other.content_hash == blob.content_hash {
+                    depths[idx].alias_indices.push(other_idx);
+                    depths[other_idx].alias_indices.push(idx);
                 }
-
-                if parent_idx == idx {
+                if other_idx == idx {
                     continue;
                 }
+
+                let parent_idx = other_idx;
+                let parent = other;
+
                 if &parent.content_hash != parent_hash {
                     continue;
                 }
