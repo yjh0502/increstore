@@ -190,6 +190,8 @@ fn main() -> Result<()> {
                             FileType::Zip
                         } else if ext == "gz" {
                             FileType::Gz
+                        } else if ext == "tar" {
+                            FileType::Plain
                         } else {
                             panic!("unknown extension: {:?}", ext);
                         }

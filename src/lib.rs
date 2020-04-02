@@ -46,6 +46,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum FileType {
     Zip,
     Gz,
+    Plain,
 }
 
 pub fn max_root_blobs() -> usize {
@@ -340,6 +341,7 @@ fn append_full(input_filepath: &str, ty: FileType) -> Result<Option<Blob>> {
     let blob = match ty {
         FileType::Zip => store_blob(input_filepath, |p1, p2| store_zip(p1, p2, true))?,
         FileType::Gz => store_blob(input_filepath, |p1, p2| gz::store_gz(p1, p2))?,
+        FileType::Plain => store_blob(input_filepath, |p1, p2| gz::store_plain(p1, p2))?,
     };
     if db::insert(&blob)? {
         Ok(Some(blob))
