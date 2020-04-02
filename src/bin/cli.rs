@@ -36,7 +36,7 @@ enum MySubCommandEnum {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// push
+/// push a version to archive
 #[argh(subcommand, name = "push")]
 struct SubCommandPush {
     #[argh(positional)]
@@ -49,7 +49,7 @@ struct SubCommandPush {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// get
+/// get a version from archive
 #[argh(subcommand, name = "get")]
 struct SubCommandGet {
     #[argh(positional)]
@@ -63,7 +63,7 @@ struct SubCommandGet {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// rename
+/// rename a existing version to new name
 #[argh(subcommand, name = "rename")]
 struct SubCommandRename {
     #[argh(positional)]
@@ -73,7 +73,7 @@ struct SubCommandRename {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// exists
+/// check if a version with given name already exists in archive
 #[argh(subcommand, name = "exists")]
 struct SubCommandExists {
     #[argh(positional)]
@@ -81,17 +81,18 @@ struct SubCommandExists {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// dehydrate
+/// Remove all frontier versions from archive. The archive should be hydrated before adding a new
+/// version. You can still able to get a existing version from archive.
 #[argh(subcommand, name = "dehydrate")]
 struct SubCommandDehydrate {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// hydrate
+/// Restore all frontier version from archive. It will allow dehydrated archive to add new version.
 #[argh(subcommand, name = "hydrate")]
 struct SubCommandHydrate {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// archive
+/// Create a tar archive from archive. The tar archive contains dehydrated archive.
 #[argh(subcommand, name = "archive")]
 struct SubCommandArchive {
     #[argh(positional)]
@@ -99,7 +100,7 @@ struct SubCommandArchive {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// import-urls
+/// import-urls. no not use.
 #[argh(subcommand, name = "import-urls")]
 struct SubCommandImportUrls {
     #[argh(positional)]
@@ -107,12 +108,12 @@ struct SubCommandImportUrls {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// validate
+/// Get all versions from archive and validate checksum.
 #[argh(subcommand, name = "validate")]
 struct SubCommandValidate {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// bench-zip
+/// bench-zip. for dev.
 #[argh(subcommand, name = "bench-zip")]
 struct SubCommandBenchZip {
     #[argh(description = "parallel", switch, short = 'p')]
@@ -127,12 +128,12 @@ struct SubCommandBenchZip {
 struct SubCommandCleanUp {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// debug-depth
+/// Print statistics of archive.
 #[argh(subcommand, name = "debug-stats")]
 struct SubCommandStats {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// debug-graph
+/// Write graphviz graph of archive.
 #[argh(subcommand, name = "debug-graph")]
 struct SubCommandGraph {
     #[argh(positional)]
@@ -154,12 +155,12 @@ struct SubCommandListFiles {
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// debug-graph
+/// debug-blobs
 #[argh(subcommand, name = "debug-blobs")]
 struct SubCommandBlobs {}
 
 #[derive(FromArgs, PartialEq, Debug)]
-/// debug-list-files
+/// debug-hash
 #[argh(subcommand, name = "debug-hash")]
 struct SubCommandHash {
     #[argh(positional)]
