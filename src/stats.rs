@@ -248,9 +248,10 @@ impl Stats {
             writeln!(s, "## stats").ok();
             writeln!(
                 s,
-                "  total count={}, size={}",
+                "  total count={}, size={}, dehydrated={}",
                 self.root_count + self.non_root_count,
-                ByteSize(self.root_total_size + self.non_root_store_size)
+                ByteSize(self.root_total_size + self.non_root_store_size),
+                ByteSize(self.blobs[0].store_size + self.non_root_store_size),
             )
             .ok();
 
