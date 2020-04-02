@@ -184,8 +184,18 @@ fn main() -> Result<()> {
                 (true, false) => FileType::Zip,
                 (false, true) => FileType::Gz,
                 (false, false) => {
-                    // default
-                    FileType::Zip
+                    let path = std::path::Path::new(&cmd.filename);
+                    if let Some(ext) = path.extension() {
+                        if ext == "zip" || ext == "apK" {
+                            FileType::Zip
+                        } else if ext == "gz" {
+                            FileType::Gz
+                        } else {
+                            panic!("unknown extension: {:?}", ext);
+                        }
+                    } else {
+                        panic!("unknown extension: {}", cmd.filename);
+                    }
                 }
             };
             push(&cmd.filename, ty)
