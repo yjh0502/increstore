@@ -8,7 +8,7 @@ where
 {
     let input_file = std::fs::File::open(input_path)?;
     let mut dst_file = std::fs::File::open(dst_path)?;
-    let mut decoder = flate2::read::DeflateDecoder::new(input_file);
+    let mut decoder = flate2::read::GzDecoder::new(input_file);
 
     let mut out_file = HashRW::new(&mut dst_file);
 
