@@ -22,7 +22,7 @@ where
     P2: AsRef<Path>,
 {
     let mut input_file = std::fs::File::open(input_path)?;
-    let mut dst_file = std::fs::File::open(dst_path)?;
+    let mut dst_file = std::fs::File::create(dst_path)?;
     let mut out_file = HashRW::new(&mut dst_file);
 
     std::io::copy(&mut input_file, &mut out_file)?;

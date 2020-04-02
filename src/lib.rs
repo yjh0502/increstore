@@ -2,12 +2,12 @@ use std::io;
 use std::path::*;
 
 use async_std::task::block_on;
+pub use failure::Error;
 use futures::prelude::*;
 use log::*;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
 use tempfile::*;
-use thiserror::Error;
 
 mod batch;
 pub mod db;
@@ -25,20 +25,6 @@ use rw::*;
 use stats::Stats;
 use std::env;
 pub use validate::validate;
-
-#[derive(Error, Debug)]
-pub enum Error {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Rsqlite(#[from] rusqlite::Error),
-    #[error(transparent)]
-    TempFilePersist(#[from] tempfile::PersistError),
-    #[error(transparent)]
-    Hyper(#[from] hyper::Error),
-    #[error(transparent)]
-    WalkDir(#[from] walkdir::Error),
-}
 
 pub type Result<T> = std::result::Result<T, Error>;
 

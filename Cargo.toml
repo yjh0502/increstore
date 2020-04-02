@@ -22,7 +22,6 @@ sha1 = "0.6.0"
 stopwatch = "0.0.7"
 tar = "0.4.26"
 tempfile = "3.1.0"
-thiserror = "1.0.11"
 time = "0.1"
 xdelta3 = { git = "https://github.com/yjh0502/xdelta3-rs" }
 zip = "0.5.4"
@@ -32,6 +31,7 @@ tokio = { version = "0.2.13", features = ["fs"] }
 walkdir = "2.3.1"
 memmap = "0.7.0"
 flate2 = "1.0.14"
+failure = "0.1.7"
 
 [profile.release]
 debug = true
