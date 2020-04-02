@@ -424,7 +424,7 @@ pub fn push(input_filepath: &str, ty: FileType) -> Result<()> {
             return Ok(());
         }
     };
-    info!("push: dt_store_zip={}ms", sw.elapsed_ms(),);
+    info!("push: append_full={}ms", sw.elapsed_ms(),);
 
     if root_blobs.is_empty() {
         info!("push: no root blobs: genesis");
