@@ -22,7 +22,7 @@ impl WriteMetadata {
             size: 0,
             time_created: time::now().to_timespec(),
             // hash: sha1::Sha1::new(),
-            hash0: SseHash::new(&key).unwrap(),
+            hash0: SseHash::new(key).unwrap(),
         }
     }
 
