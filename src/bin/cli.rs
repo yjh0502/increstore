@@ -35,8 +35,8 @@ enum MySubCommandEnum {
     Hash(SubCommandHash),
 }
 
-#[derive(FromArgs, PartialEq, Debug)]
 /// push a version to archive
+#[derive(FromArgs, PartialEq, Debug)]
 #[argh(subcommand, name = "push")]
 struct SubCommandPush {
     #[argh(positional)]
