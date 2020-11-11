@@ -8,7 +8,7 @@ use super::db;
 #[derive(Clone)]
 pub struct WriteMetadata {
     size: u64,
-    time_created: time::Timespec,
+    time_created: time::OffsetDateTime,
 
     // hash: sha1::Sha1,
     hash0: SseHash,
@@ -20,7 +20,7 @@ impl WriteMetadata {
         let key = highway::Key([1, 2, 3, 4]);
         Self {
             size: 0,
-            time_created: time::now().to_timespec(),
+            time_created: time::OffsetDateTime::now_local(),
             // hash: sha1::Sha1::new(),
             hash0: SseHash::new(key).unwrap(),
         }

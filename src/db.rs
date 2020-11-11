@@ -5,7 +5,7 @@ use rusqlite::{params, Connection, Result};
 pub struct Blob {
     pub id: u32,
     pub filename: String,
-    pub time_created: time::Timespec,
+    pub time_created: time::OffsetDateTime,
 
     pub store_size: u64,
     pub content_size: u64,
