@@ -1,7 +1,7 @@
 use super::*;
 
-pub fn validate() -> Result<()> {
-    let blobs = db::all()?;
+pub fn validate(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
     let stats = Stats::from_blobs(blobs);
 
     validate_blob_root(0, stats)?;

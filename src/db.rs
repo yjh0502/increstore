@@ -32,9 +32,14 @@ pub fn dbpath() -> String {
     format!("{}/meta.db", prefix())
 }
 
-pub fn prepare() -> Result<()> {
-    let conn = Connection::open(dbpath())?;
+pub type Conn = rusqlite::Connection;
 
+pub fn open() -> Result<rusqlite::Connection> {
+    let conn = Connection::open(dbpath())?;
+    Ok(conn)
+}
+
+pub fn prepare(conn: &mut rusqlite::Connection) -> Result<()> {
     conn.execute(
         r#"
 create table if not exists blobs (
@@ -60,9 +65,7 @@ create table if not exists blobs (
     Ok(())
 }
 
-pub fn all() -> Result<Vec<Blob>> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn all(conn: &mut rusqlite::Connection) -> Result<Vec<Blob>> {
     let mut stmt = conn.prepare(
         r#"
 select
@@ -79,9 +82,7 @@ from blobs
     Ok(rows)
 }
 
-pub fn by_filename(filename: &str) -> Result<Vec<Blob>> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn by_filename(conn: &mut Conn, filename: &str) -> Result<Vec<Blob>> {
     let mut stmt = conn.prepare(
         r#"
 select
@@ -180,9 +181,7 @@ insert or ignore into blobs (
     Ok(inserted > 0)
 }
 
-pub fn rename(from_filename: &str, to_filename: &str) -> Result<bool> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn rename(conn: &mut Conn, from_filename: &str, to_filename: &str) -> Result<bool> {
     let updated = conn.execute(
         r#"
     update blobs set filename = ?2 where filename = ?1

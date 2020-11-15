@@ -83,8 +83,8 @@ fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<bool> {
     db::insert(blob).map_err(Error::from)
 }
 
-pub fn get(filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
-    let mut blob = match db::by_filename(filename)?.pop() {
+pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
+    let mut blob = match db::by_filename(conn, filename)?.pop() {
         Some(blob) => blob,
         None => {
             eprintln!("unknown filename: {}", filename);
@@ -151,10 +151,10 @@ pub fn get(filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn exists(filename: &str) -> Result<()> {
+pub fn exists(conn: &mut db::Conn, filename: &str) -> Result<()> {
     let input_filename = Path::new(&filename).file_name().unwrap().to_str().unwrap();
 
-    let blobs = db::by_filename(&input_filename)?;
+    let blobs = db::by_filename(conn, &input_filename)?;
     if blobs.is_empty() {
         std::process::exit(1);
     } else {
@@ -163,16 +163,16 @@ pub fn exists(filename: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn rename(from_filename: &str, to_filename: &str) -> Result<()> {
-    let renamed = db::rename(from_filename, to_filename)?;
+pub fn rename(conn: &mut db::Conn, from_filename: &str, to_filename: &str) -> Result<()> {
+    let renamed = db::rename(conn, from_filename, to_filename)?;
     if !renamed {
         error!("file not exists: {}", from_filename);
     }
     Ok(())
 }
 
-pub fn dehydrate() -> Result<()> {
-    let blobs = db::all()?;
+pub fn dehydrate(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
     let stats = Stats::from_blobs(blobs);
 
     let root_candidates = stats.root_candidates();
@@ -194,15 +194,15 @@ pub fn dehydrate() -> Result<()> {
     Ok(())
 }
 
-pub fn hydrate() -> Result<()> {
-    let blobs = db::all()?;
+pub fn hydrate(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
     let stats = Stats::from_blobs(blobs);
 
     let root_candidates = stats.root_candidates();
     for root_blob in root_candidates {
         let path = filepath(&root_blob.blob.content_hash);
         info!("hydrating blob={}", path);
-        get(&root_blob.blob.filename, &path, false)?;
+        get(conn, &root_blob.blob.filename, &path, false)?;
     }
 
     Ok(())
@@ -238,14 +238,14 @@ where
     Ok(())
 }
 
-fn archive0<W>(w: W) -> Result<()>
+fn archive0<W>(conn: &mut db::Conn, w: W) -> Result<()>
 where
     W: std::io::Write,
 {
     let mut ar = tar::Builder::new(w);
     archive_add_file(&mut ar, &db::dbpath())?;
 
-    let blobs = db::all()?;
+    let blobs = db::all(conn)?;
     for blob in blobs {
         if blob.is_genesis() || !blob.is_root() {
             archive_add_file(&mut ar, &filepath(&blob.store_hash))?;
@@ -254,19 +254,19 @@ where
     Ok(())
 }
 
-pub fn archive(filename: &str) -> Result<()> {
+pub fn archive(conn: &mut db::Conn, filename: &str) -> Result<()> {
     if filename != "-" {
         let file = std::fs::File::create(filename)?;
-        archive0(file)
+        archive0(conn, file)
     } else {
         let stdout = std::io::stdout();
         let out = stdout.lock();
-        archive0(out)
+        archive0(conn, out)
     }
 }
 
-pub fn cleanup() -> Result<()> {
-    let blobs = db::all()?;
+pub fn cleanup(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
     let stats = Stats::from_blobs(blobs);
 
     let mut root_candidates = stats.root_candidates();
@@ -411,7 +411,7 @@ fn ratio_summary(blobs: &[Blob]) -> String {
     s
 }
 
-pub fn push(input_filepath: &str, ty: FileType) -> Result<()> {
+pub fn push(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<()> {
     debug!("push: input_filepath={}", input_filepath);
 
     let root_blobs = db::roots()?;
@@ -449,7 +449,7 @@ pub fn push(input_filepath: &str, ty: FileType) -> Result<()> {
         std::fs::remove_file(&filepath(&blob.store_hash))?;
     }
 
-    cleanup()?;
+    cleanup(conn)?;
 
     Ok(())
 }
@@ -464,8 +464,8 @@ pub fn bench_zip(input_filepath: &str, parallel: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn debug_stats() -> Result<()> {
-    let blobs = db::all()?;
+pub fn debug_stats(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
 
     let stats = Stats::from_blobs(blobs);
     println!("info\n{}", stats.size_info());
@@ -473,10 +473,10 @@ pub fn debug_stats() -> Result<()> {
     Ok(())
 }
 
-pub fn debug_graph(filename: &str) -> Result<()> {
+pub fn debug_graph(conn: &mut db::Conn, filename: &str) -> Result<()> {
     use std::fmt::Write;
 
-    let blobs = db::all()?;
+    let blobs = db::all(conn)?;
     let stats = Stats::from_blobs(blobs);
 
     let mut s = String::new();
@@ -560,8 +560,14 @@ pub fn debug_graph(filename: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn debug_list_files(genesis: bool, roots: bool, non_roots: bool, long: bool) -> Result<()> {
-    let blobs = db::all()?;
+pub fn debug_list_files(
+    conn: &mut db::Conn,
+    genesis: bool,
+    roots: bool,
+    non_roots: bool,
+    long: bool,
+) -> Result<()> {
+    let blobs = db::all(conn)?;
     for blob in blobs.into_iter() {
         let is_root = blob.is_root();
 
@@ -598,8 +604,8 @@ fn path_to_hash(mut path: PathBuf, root: &Path) -> Option<String> {
     Some(s)
 }
 
-pub fn debug_blobs() -> Result<()> {
-    let blobs = db::all()?;
+pub fn debug_blobs(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
 
     // check blob store
     {

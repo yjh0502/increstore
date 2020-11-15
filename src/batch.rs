@@ -1,7 +1,8 @@
-use crate::{db, push, FileType, Result};
+use crate::{db, Result};
 use log::*;
 use stopwatch::Stopwatch;
 
+#[allow(unused)]
 async fn download_url(url: hyper::Uri, filename: String) -> Result<String> {
     use async_std::io::prelude::*;
     use hyper::{body::HttpBody as _, Client, StatusCode};
@@ -34,7 +35,9 @@ async fn download_url(url: hyper::Uri, filename: String) -> Result<String> {
     Ok(filename)
 }
 
-pub fn import_urls(url_file: &str) -> Result<()> {
+pub fn import_urls(_conn: &mut db::Conn, _url_file: &str) -> Result<()> {
+    /*
+    use crate::{db, Result};
     use futures::prelude::*;
     use futures::stream::TryStreamExt;
     use futures::task::SpawnExt;
@@ -57,7 +60,7 @@ pub fn import_urls(url_file: &str) -> Result<()> {
         let tmpdir = crate::tmpdir();
         let filepath = format!("{}/{}", tmpdir, filename);
 
-        let blobs = db::by_filename(&filename)?;
+        let blobs = db::by_filename(conn, &filename)?;
         if blobs.is_empty() {
             f_list.push(download_url(uri, filepath))
         }
@@ -67,7 +70,7 @@ pub fn import_urls(url_file: &str) -> Result<()> {
     let stream = stream::iter(f_list)
         .buffered(4)
         .and_then(|filename| {
-            pool.spawn_with_handle(async move { push(&filename, FileType::Zip) })
+            pool.spawn_with_handle(async move { push(conn, &filename, FileType::Zip) })
                 .expect("spawn_with_handle")
         })
         .try_collect::<Vec<_>>();
@@ -76,4 +79,6 @@ pub fn import_urls(url_file: &str) -> Result<()> {
     runtime.block_on(stream)?;
 
     Ok(())
+    */
+    todo!();
 }

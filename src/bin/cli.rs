@@ -172,7 +172,9 @@ fn main() -> Result<()> {
 
     std::fs::create_dir_all(prefix()).expect("failed to create dir");
 
-    db::prepare().expect("failed to prepare");
+    let mut conn = db::open()?;
+    let conn = &mut conn;
+    db::prepare(conn).expect("failed to prepare");
 
     let up: TopLevel = argh::from_env();
 
@@ -201,30 +203,30 @@ fn main() -> Result<()> {
                     }
                 }
             };
-            push(&cmd.filename, ty)
+            push(conn, &cmd.filename, ty)
         }
-        MySubCommandEnum::Get(cmd) => get(&cmd.filename, &cmd.out_filename, cmd.dry_run),
-        MySubCommandEnum::Exists(cmd) => exists(&cmd.filename),
+        MySubCommandEnum::Get(cmd) => get(conn, &cmd.filename, &cmd.out_filename, cmd.dry_run),
+        MySubCommandEnum::Exists(cmd) => exists(conn, &cmd.filename),
 
-        MySubCommandEnum::Rename(cmd) => rename(&cmd.from_filename, &cmd.to_filename),
+        MySubCommandEnum::Rename(cmd) => rename(conn, &cmd.from_filename, &cmd.to_filename),
 
-        MySubCommandEnum::Dedytrate(_cmd) => dehydrate(),
-        MySubCommandEnum::Hydrate(_cmd) => hydrate(),
+        MySubCommandEnum::Dedytrate(_cmd) => dehydrate(conn),
+        MySubCommandEnum::Hydrate(_cmd) => hydrate(conn),
 
-        MySubCommandEnum::Archive(cmd) => archive(&cmd.filename),
+        MySubCommandEnum::Archive(cmd) => archive(conn, &cmd.filename),
 
-        MySubCommandEnum::ImportUrls(cmd) => import_urls(&cmd.filename),
-        MySubCommandEnum::Validate(_cmd) => validate(),
+        MySubCommandEnum::ImportUrls(cmd) => import_urls(conn, &cmd.filename),
+        MySubCommandEnum::Validate(_cmd) => validate(conn),
 
         MySubCommandEnum::BenchZip(cmd) => bench_zip(&cmd.filename, cmd.parallel),
 
-        MySubCommandEnum::CleanUp(_cmd) => cleanup(),
-        MySubCommandEnum::Stats(_cmd) => debug_stats(),
-        MySubCommandEnum::Graph(cmd) => debug_graph(&cmd.filename),
+        MySubCommandEnum::CleanUp(_cmd) => cleanup(conn),
+        MySubCommandEnum::Stats(_cmd) => debug_stats(conn),
+        MySubCommandEnum::Graph(cmd) => debug_graph(conn, &cmd.filename),
         MySubCommandEnum::ListFiles(cmd) => {
-            debug_list_files(cmd.genesis, cmd.roots, cmd.non_roots, cmd.long)
+            debug_list_files(conn, cmd.genesis, cmd.roots, cmd.non_roots, cmd.long)
         }
-        MySubCommandEnum::Blobs(_cmd) => debug_blobs(),
+        MySubCommandEnum::Blobs(_cmd) => debug_blobs(conn),
         MySubCommandEnum::Hash(cmd) => debug_hash(&cmd.filename),
     }
 }
