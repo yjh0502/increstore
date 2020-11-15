@@ -1,4 +1,5 @@
 use crate::prefix;
+use log::info;
 use rusqlite::{params, Connection, Result};
 
 #[derive(Debug, Clone)]
@@ -35,8 +36,27 @@ pub fn dbpath() -> String {
 pub type Conn = rusqlite::Connection;
 
 pub fn open() -> Result<rusqlite::Connection> {
-    let conn = Connection::open(dbpath())?;
-    Ok(conn)
+    let mut wait_count = 0;
+    loop {
+        match Connection::open(dbpath()) {
+            Ok(conn) => return Ok(conn),
+            Err(e) => match e {
+                rusqlite::Error::SqliteFailure(ref e2, ref _msg) => {
+                    if e2.code == rusqlite::ErrorCode::DatabaseLocked {
+                        if wait_count > 5 {
+                            return Err(e);
+                        }
+                        info!("database is locked, waiting");
+                        wait_count += 1;
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
+                    }
+                }
+                e => {
+                    return Err(e);
+                }
+            },
+        }
+    }
 }
 
 pub fn prepare(conn: &mut rusqlite::Connection) -> Result<()> {
