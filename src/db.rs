@@ -59,7 +59,7 @@ pub fn open() -> Result<rusqlite::Connection> {
     }
 }
 
-pub fn prepare(conn: &mut rusqlite::Connection) -> Result<()> {
+pub fn prepare(conn: &mut Conn) -> Result<()> {
     conn.execute(
         r#"
 create table if not exists blobs (
@@ -85,7 +85,7 @@ create table if not exists blobs (
     Ok(())
 }
 
-pub fn all(conn: &mut rusqlite::Connection) -> Result<Vec<Blob>> {
+pub fn all(conn: &mut Conn) -> Result<Vec<Blob>> {
     let mut stmt = conn.prepare(
         r#"
 select
@@ -120,9 +120,7 @@ where filename = ?
     Ok(rows)
 }
 
-pub fn by_content_hash(content_hash: &str) -> Result<Vec<Blob>> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn by_content_hash(conn: &mut Conn, content_hash: &str) -> Result<Vec<Blob>> {
     let mut stmt = conn.prepare(
         r#"
 select
@@ -156,9 +154,7 @@ fn decode_row(row: &rusqlite::Row) -> Result<Blob> {
     })
 }
 
-pub fn latest() -> Result<Blob> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn latest(conn: &mut Conn) -> Result<Blob> {
     conn.query_row(
         r#"
 select
@@ -172,9 +168,7 @@ limit 1"#,
     )
 }
 
-pub fn insert(blob: &Blob) -> Result<bool> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn insert(conn: &mut Conn, blob: &Blob) -> Result<bool> {
     let inserted = conn.execute(
         r#"
 insert or ignore into blobs (
@@ -211,9 +205,7 @@ pub fn rename(conn: &mut Conn, from_filename: &str, to_filename: &str) -> Result
     Ok(updated > 0)
 }
 
-pub fn remove(blob: &Blob) -> Result<()> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn remove(conn: &mut Conn, blob: &Blob) -> Result<()> {
     conn.execute(
         r#"
 delete from blobs where store_hash = ?1
@@ -223,9 +215,7 @@ delete from blobs where store_hash = ?1
     Ok(())
 }
 
-pub fn roots() -> Result<Vec<Blob>> {
-    let conn = Connection::open(dbpath())?;
-
+pub fn roots(conn: &mut Conn) -> Result<Vec<Blob>> {
     let mut stmt = conn.prepare(
         r#"
 select

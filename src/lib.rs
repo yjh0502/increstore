@@ -73,14 +73,14 @@ where
     Ok(())
 }
 
-fn update_blob(tmp_path: NamedTempFile, blob: &Blob) -> Result<bool> {
+fn update_blob(conn: &mut db::Conn, tmp_path: NamedTempFile, blob: &Blob) -> Result<bool> {
     let path = filepath(&blob.store_hash);
 
     trace!("path={:?}", path);
     store_object(tmp_path, &path)?;
 
     // TODO: update id
-    db::insert(blob).map_err(Error::from)
+    db::insert(conn, blob).map_err(Error::from)
 }
 
 pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
@@ -97,7 +97,7 @@ pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: boo
 
     //TODO: use graph?
     while let Some(parent_hash) = &blob.parent_hash {
-        let parent_blob = db::by_content_hash(parent_hash)?
+        let parent_blob = db::by_content_hash(conn, parent_hash)?
             .pop()
             .expect(&format!("no blob with content_hash {}", parent_hash));
 
@@ -293,7 +293,7 @@ pub fn cleanup(conn: &mut db::Conn) -> Result<()> {
 
     for root_blob in root_candidates.into_iter().skip(max_root_blobs()) {
         let root = root_blob.blob;
-        db::remove(&root)?;
+        db::remove(conn, &root)?;
         std::fs::remove_file(&filepath(&root.content_hash))?;
     }
 
@@ -321,7 +321,7 @@ where
     Ok(input_blob)
 }
 
-fn append_full(input_filepath: &str, ty: FileType) -> Result<Option<Blob>> {
+fn append_full(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<Option<Blob>> {
     trace!("append_full: input_filepath={} ty={:?}", input_filepath, ty);
 
     let blob = match ty {
@@ -329,7 +329,7 @@ fn append_full(input_filepath: &str, ty: FileType) -> Result<Option<Blob>> {
         FileType::Gz => store_blob(input_filepath, |p1, p2| gz::store_gz(p1, p2))?,
         FileType::Plain => store_blob(input_filepath, |p1, p2| gz::store_plain(p1, p2))?,
     };
-    if db::insert(&blob)? {
+    if db::insert(conn, &blob)? {
         Ok(Some(blob))
     } else {
         Ok(None)
@@ -342,10 +342,10 @@ fn append_delta(
     input_blob: &Blob,
     src_blob: &Blob,
     race: Arc<AtomicUsize>,
-) -> Result<Option<Blob>> {
+) -> Result<Option<(NamedTempFile, Blob)>> {
     let sw = Stopwatch::start_new();
     let input_filepath = filepath(&input_blob.content_hash);
-    let blob = {
+    let (tmp, blob) = {
         let tmp_dir = tmpdir();
         let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
 
@@ -384,14 +384,7 @@ fn append_delta(
             blob.content_hash,
             blob.store_hash
         );
-        if !update_blob(tmp_path, &blob)? {
-            info!(
-                "append_delta: failed to insert, store_hash={}",
-                blob.store_hash
-            );
-            return Ok(None);
-        }
-        blob
+        (tmp_path, blob)
     };
     let dt_store_delta = sw.elapsed_ms();
 
@@ -400,12 +393,13 @@ fn append_delta(
         blob.compression_ratio() * 100.0,
         dt_store_delta,
     );
-    Ok(Some(blob))
+    Ok(Some((tmp, blob)))
 }
 
-fn ratio_summary(blobs: &[Blob]) -> String {
+fn ratio_summary(blobs: &[(NamedTempFile, Blob)]) -> String {
     let mut s = String::new();
     for blob in blobs {
+        let blob = &blob.1;
         s += &format!("{}={:.02}% ", blob.id, blob.compression_ratio() * 100.0);
     }
     s
@@ -414,10 +408,10 @@ fn ratio_summary(blobs: &[Blob]) -> String {
 pub fn push(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<()> {
     debug!("push: input_filepath={}", input_filepath);
 
-    let root_blobs = db::roots()?;
+    let root_blobs = db::roots(conn)?;
 
     let sw = Stopwatch::start_new();
-    let input_blob = match append_full(input_filepath, ty)? {
+    let input_blob = match append_full(conn, input_filepath, ty)? {
         Some(blob) => blob,
         None => {
             info!("push: content already exists, skipping");
@@ -440,13 +434,17 @@ pub fn push(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<(
 
     let mut link_blobs = link_blobs.into_iter().filter_map(|v| v).collect::<Vec<_>>();
 
-    link_blobs.sort_by_key(|blob| blob.store_size);
+    link_blobs.sort_by_key(|blob| blob.1.store_size);
 
     debug!("compression ratio: {}", ratio_summary(&link_blobs));
 
-    for blob in link_blobs.into_iter().skip(1) {
-        db::remove(&blob)?;
-        std::fs::remove_file(&filepath(&blob.store_hash))?;
+    let (tmp_path, blob) = link_blobs.into_iter().next().expect("no blobs");
+    // optimal block
+    if !update_blob(conn, tmp_path, &blob)? {
+        info!(
+            "append_delta: failed to insert, store_hash={}",
+            blob.store_hash
+        );
     }
 
     cleanup(conn)?;
