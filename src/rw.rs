@@ -191,11 +191,20 @@ impl<W> RaceWrite<W> {
 
 impl<W> Drop for RaceWrite<W> {
     fn drop(&mut self) {
+        let ordering = Ordering::SeqCst;
+
         let mut value = self.race.load(Ordering::SeqCst);
         while value < self.size {
-            self.race
-                .compare_and_swap(value, self.size, Ordering::SeqCst);
-            value = self.race.load(Ordering::SeqCst);
+            if let Err(loaded) = self
+                .race
+                .compare_exchange(value, self.size, ordering, ordering)
+            {
+                if loaded >= self.size {
+                    break;
+                } else {
+                    value = loaded;
+                }
+            }
         }
     }
 }
