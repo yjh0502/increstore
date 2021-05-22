@@ -21,7 +21,7 @@ where
     let mut file = zipar.by_index(idx)?;
     let filename = file.name().to_owned();
 
-    let mut header = tar::Header::new_gnu();
+    let mut header = tar::Header::new_ustar();
     header.set_path(&filename)?;
     header.set_size(file.size());
 
