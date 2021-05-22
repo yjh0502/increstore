@@ -189,7 +189,7 @@ fn main() -> Result<()> {
                 (false, false) => {
                     let path = std::path::Path::new(&cmd.filename);
                     if let Some(ext) = path.extension() {
-                        if ext == "zip" || ext == "apk" {
+                        if ext == "zip" || ext == "apk" || ext == "aab" {
                             FileType::Zip
                         } else if ext == "gz" {
                             FileType::Gz
