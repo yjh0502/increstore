@@ -1,5 +1,4 @@
 use argh::FromArgs;
-use increstore::*;
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// Top-level command.
@@ -167,7 +166,9 @@ struct SubCommandHash {
     filename: String,
 }
 
-fn main() -> Result<()> {
+fn main() -> increstore::Result<()> {
+    use increstore::*;
+
     env_logger::init();
 
     std::fs::create_dir_all(prefix()).expect("failed to create dir");
