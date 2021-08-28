@@ -250,59 +250,6 @@ where
     }
 }
 
-pub struct Compat<T> {
-    w: T,
-}
-
-impl<T> Compat<T> {
-    #[allow(unused)]
-    pub fn new(w: T) -> Self {
-        Self { w }
-    }
-}
-
-impl<T> futures::AsyncRead for Compat<T>
-where
-    T: tokio::io::AsyncRead + Unpin,
-{
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<tokio::io::Result<usize>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        w.poll_read(cx, buf)
-    }
-}
-
-impl<T> futures::AsyncWrite for Compat<T>
-where
-    T: tokio::io::AsyncWrite + Unpin,
-{
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<tokio::io::Result<usize>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        w.poll_write(cx, buf)
-    }
-
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        w.poll_flush(cx)
-    }
-
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<tokio::io::Result<()>> {
-        let mut s = self.as_mut();
-        let w = Pin::new(&mut s.w);
-        w.poll_shutdown(cx)
-    }
-}
-
 pub struct MmapBuf {
     #[allow(unused)]
     file: std::fs::File,

@@ -21,7 +21,6 @@ enum MySubCommandEnum {
 
     Archive(SubCommandArchive),
 
-    ImportUrls(SubCommandImportUrls),
     Validate(SubCommandValidate),
 
     BenchZip(SubCommandBenchZip),
@@ -94,14 +93,6 @@ struct SubCommandHydrate {}
 /// Create a tar archive from archive. The tar archive contains dehydrated archive.
 #[argh(subcommand, name = "archive")]
 struct SubCommandArchive {
-    #[argh(positional)]
-    filename: String,
-}
-
-#[derive(FromArgs, PartialEq, Debug)]
-/// import-urls. no not use.
-#[argh(subcommand, name = "import-urls")]
-struct SubCommandImportUrls {
     #[argh(positional)]
     filename: String,
 }
@@ -216,7 +207,6 @@ fn main() -> increstore::Result<()> {
 
         MySubCommandEnum::Archive(cmd) => archive(conn, &cmd.filename),
 
-        MySubCommandEnum::ImportUrls(cmd) => import_urls(conn, &cmd.filename),
         MySubCommandEnum::Validate(_cmd) => validate(conn),
 
         MySubCommandEnum::BenchZip(cmd) => bench_zip(&cmd.filename, cmd.parallel),

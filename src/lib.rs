@@ -9,7 +9,6 @@ use rayon::prelude::*;
 use stopwatch::Stopwatch;
 use tempfile::*;
 
-mod batch;
 pub mod db;
 mod delta;
 mod gz;
@@ -19,7 +18,6 @@ mod validate;
 pub mod zip;
 
 use crate::zip::store_zip;
-pub use batch::import_urls;
 use db::Blob;
 use rw::*;
 use stats::Stats;
