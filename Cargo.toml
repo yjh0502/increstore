@@ -17,7 +17,7 @@ highway = "0.6"
 log = "0.4.8"
 pbr = "1.0.2"
 rayon = "1.3.0"
-rusqlite = { version = "0.25", features = ["time"] }
+rusqlite = { version = "0.24", features = ["time"] }
 sha1 = "0.6.0"
 stopwatch = "0.0.7"
 tar = "0.4.26"
