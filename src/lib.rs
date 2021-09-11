@@ -351,9 +351,13 @@ fn append_delta(
         let src_filepath = filepath(src_hash);
 
         let res = block_on(async {
-            let src_file = async_std::fs::File::open(&src_filepath).await?;
-            let input_file = async_std::fs::File::open(&input_filepath).await?;
-            let dst_file = async_std::fs::File::create(tmp_path.path()).await?;
+            use async_std::{fs::File, io::BufReader};
+            let src_file = File::open(&src_filepath).await?;
+            let input_file = File::open(&input_filepath).await?;
+            let dst_file = File::create(tmp_path.path()).await?;
+
+            let src_file = BufReader::with_capacity(1024 * 1024 * 16, src_file);
+            let input_file = BufReader::with_capacity(1024 * 1024 * 16, input_file);
 
             let race = RaceWrite::new(dst_file, race);
 
