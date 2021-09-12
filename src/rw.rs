@@ -1,6 +1,7 @@
+use futures::ready;
 use std::io;
+use tokio::io::ReadBuf;
 
-use async_std::task::ready;
 use highway::*;
 
 use super::db;
@@ -20,7 +21,7 @@ impl WriteMetadata {
         let key = highway::Key([1, 2, 3, 4]);
         Self {
             size: 0,
-            time_created: time::OffsetDateTime::now_local(),
+            time_created: time::OffsetDateTime::now_utc(),
             // hash: sha1::Sha1::new(),
             hash0: SseHash::new(key).unwrap(),
         }
@@ -111,9 +112,9 @@ use std::marker::Unpin;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-impl<W> async_std::io::Write for HashRW<W>
+impl<W> tokio::io::AsyncWrite for HashRW<W>
 where
-    W: async_std::io::Write + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -141,31 +142,30 @@ where
         w.poll_flush(ctx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
-        w.poll_close(ctx)
+        w.poll_shutdown(ctx)
     }
 }
 
-impl<W> async_std::io::Read for HashRW<W>
+impl<W> tokio::io::AsyncRead for HashRW<W>
 where
-    W: async_std::io::Read + Unpin,
+    W: tokio::io::AsyncRead + Unpin,
 {
     fn poll_read(
         mut self: Pin<&mut Self>,
         ctx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
+        buf: &mut ReadBuf,
+    ) -> Poll<io::Result<()>> {
         // debug!("HashRw::poll_read size={}", buf.len());
 
         let mut s = self.as_mut();
         let w = Pin::new(&mut s.w);
         match ready!(w.poll_read(ctx, buf)) {
-            Ok(n) => {
-                // s.meta.hash.update(&buf[..n]);
-                s.meta.hash0.append(&buf[..n]);
-                Poll::Ready(Ok(n))
+            Ok(()) => {
+                s.meta.hash0.append(buf.filled());
+                Poll::Ready(Ok(()))
             }
             Err(e) => Poll::Ready(Err(e)),
         }
@@ -209,9 +209,9 @@ impl<W> Drop for RaceWrite<W> {
     }
 }
 
-impl<W> async_std::io::Write for RaceWrite<W>
+impl<W> tokio::io::AsyncWrite for RaceWrite<W>
 where
-    W: async_std::io::Write + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
 {
     fn poll_write(
         mut self: Pin<&mut Self>,
@@ -241,12 +241,12 @@ where
         w.poll_flush(ctx)
     }
 
-    fn poll_close(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
+    fn poll_shutdown(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
         let mut s = self.as_mut();
         s.race.store(s.size, Ordering::SeqCst);
 
         let w = Pin::new(&mut s.w);
-        w.poll_close(ctx)
+        w.poll_shutdown(ctx)
     }
 }
 
@@ -277,23 +277,23 @@ impl MmapBuf {
     }
 }
 
-impl futures::AsyncRead for MmapBuf {
+impl tokio::io::AsyncRead for MmapBuf {
     fn poll_read(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<futures::io::Result<usize>> {
-        let len = buf.len().min(self.remaining());
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let len = buf.capacity().min(self.remaining());
 
         let offset = self.offset;
         let offset_end = self.offset + len;
         {
             let src = &self.map[offset..offset_end];
-            (&mut buf[..len]).copy_from_slice(src);
+            buf.put_slice(src);
         }
         self.as_mut().offset = offset_end;
 
-        Poll::Ready(Ok(len))
+        Poll::Ready(Ok(()))
     }
 }
 
@@ -332,12 +332,12 @@ impl MmapBufMut {
     }
 }
 
-impl futures::AsyncWrite for MmapBufMut {
+impl tokio::io::AsyncWrite for MmapBufMut {
     fn poll_write(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<futures::io::Result<usize>> {
+    ) -> Poll<io::Result<usize>> {
         let len = buf.len().min(self.remaining());
 
         let offset = self.offset;
@@ -351,11 +351,49 @@ impl futures::AsyncWrite for MmapBufMut {
         Poll::Ready(Ok(len))
     }
 
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<futures::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
     }
 
-    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<futures::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::*;
+
+    #[test]
+    fn hash_rw_write() {
+        let body = b"hello, world";
+
+        let dst = Vec::<u8>::new();
+        let mut rw = HashRW::new(dst);
+
+        rw.write_all(body).expect("failed to write");
+
+        let meta = rw.meta().digest();
+        assert_eq!(
+            meta,
+            "9be0f68afedc92f37c093966e0e2f9055cefa64b9567657a8af8f88eb280d6b2"
+        );
+    }
+
+    #[test]
+    fn hash_rw_read() {
+        let body = b"hello, world";
+        let mut dst = Vec::new();
+
+        let mut rw = HashRW::new(&body[..]);
+
+        rw.read_to_end(&mut dst).expect("failed to write");
+
+        let meta = rw.meta().digest();
+        assert_eq!(
+            meta,
+            "9be0f68afedc92f37c093966e0e2f9055cefa64b9567657a8af8f88eb280d6b2"
+        );
     }
 }

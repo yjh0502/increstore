@@ -1,7 +1,6 @@
 use std::io;
 use std::path::*;
 
-use async_std::task::block_on;
 pub use failure::Error;
 use futures::prelude::*;
 use log::*;
@@ -81,6 +80,8 @@ fn update_blob(conn: &mut db::Conn, tmp_path: NamedTempFile, blob: &Blob) -> Res
     db::insert(conn, blob).map_err(Error::from)
 }
 
+const BUF_SIZE: usize = 16 * 1024 * 1024;
+
 pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
     let mut blob = match db::by_filename(conn, filename)?.pop() {
         Some(blob) => blob,
@@ -118,20 +119,25 @@ pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: boo
     let mut old_tmpfile = NamedTempFile::new_in(&tmp_dir)?;
     let mut tmpfile = NamedTempFile::new_in(&tmp_dir)?;
 
+    let rt = tokio::runtime::Runtime::new()?;
     let mut src_filepath = PathBuf::from(filepath(&blob.content_hash));
     for delta_blob in decode_path {
+        use tokio::fs::File;
+        use tokio::io::*;
+
         let delta_filepath = filepath(&delta_blob.store_hash);
         debug!("decode filename={}", delta_blob.filename);
         debug!("trace={:?}, input={:?}", src_filepath, delta_filepath);
-        let (_input_meta, dst_meta) = block_on(async {
-            let src_file = async_std::fs::File::open(&src_filepath).await?;
-            let input_file = async_std::fs::File::open(&delta_filepath).await?;
-            let dst_file = async_std::fs::File::create(tmpfile.path()).await?;
+        let (_input_meta, dst_meta) = rt.block_on(async {
+            let src_file = File::open(&src_filepath).await?;
+            let input_file = File::open(&delta_filepath).await?;
+            let dst_file = File::create(tmpfile.path()).await?;
+
             delta::delta(
                 delta::ProcessMode::Decode,
-                &src_file,
-                &input_file,
-                &dst_file,
+                BufReader::with_capacity(BUF_SIZE, src_file),
+                BufReader::with_capacity(BUF_SIZE, input_file),
+                BufWriter::with_capacity(BUF_SIZE, dst_file),
             )
             .await
         })?;
@@ -341,8 +347,10 @@ fn append_delta(
     src_blob: &Blob,
     race: Arc<AtomicUsize>,
 ) -> Result<Option<(NamedTempFile, Blob)>> {
+    let rt = tokio::runtime::Runtime::new()?;
     let sw = Stopwatch::start_new();
     let input_filepath = filepath(&input_blob.content_hash);
+
     let (tmp, blob) = {
         let tmp_dir = tmpdir();
         let tmp_path = NamedTempFile::new_in(&tmp_dir)?;
@@ -350,18 +358,22 @@ fn append_delta(
         let src_hash = &src_blob.content_hash;
         let src_filepath = filepath(src_hash);
 
-        let res = block_on(async {
-            use async_std::{fs::File, io::BufReader};
+        let res = rt.block_on(async {
+            use tokio::{fs::File, io::*};
+
             let src_file = File::open(&src_filepath).await?;
             let input_file = File::open(&input_filepath).await?;
             let dst_file = File::create(tmp_path.path()).await?;
 
-            let src_file = BufReader::with_capacity(1024 * 1024 * 16, src_file);
-            let input_file = BufReader::with_capacity(1024 * 1024 * 16, input_file);
+            let race = RaceWrite::new(BufWriter::with_capacity(BUF_SIZE, dst_file), race);
 
-            let race = RaceWrite::new(dst_file, race);
-
-            delta::delta(delta::ProcessMode::Encode, src_file, input_file, race).await
+            delta::delta(
+                delta::ProcessMode::Encode,
+                BufReader::with_capacity(BUF_SIZE, src_file),
+                BufReader::with_capacity(BUF_SIZE, input_file),
+                race,
+            )
+            .await
         });
 
         let (_input_meta, dst_meta) = match res {

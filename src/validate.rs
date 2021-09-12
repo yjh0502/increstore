@@ -12,7 +12,9 @@ pub fn validate(conn: &mut db::Conn) -> Result<()> {
 pub fn validate_blob_root(idx: usize, stats: Stats) -> Result<()> {
     let stats = Arc::new(stats);
     let src_filepath = filepath(&stats.blobs[idx].store_hash);
-    block_on(validate_blob_children(0, src_filepath, stats))?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(validate_blob_children(0, src_filepath, stats))?;
 
     Ok(())
 }
@@ -34,7 +36,7 @@ where
     for child_idx in children {
         let f = validate_blob_children0(child_idx, src_path_buf.clone(), stats.clone());
         if stats.child_count(child_idx) == 1 {
-            handles.push(async_std::task::spawn(f));
+            handles.push(tokio::task::spawn(f));
         } else {
             f.await?;
         }
@@ -42,7 +44,7 @@ where
 
     // wait for all async tasks
     for handle in handles {
-        handle.await?;
+        handle.await??;
     }
 
     if let Some(child_idx) = last {
@@ -113,31 +115,17 @@ where
     let mode = delta::ProcessMode::Decode;
 
     let (_input_meta, dst_meta) = {
-        if false {
-            // async_std based
-            let input_file = async_std::fs::File::open(&delta_filepath).await?;
-            let src_file = async_std::fs::File::open(src_filepath.as_ref()).await?;
+        // mmap based
+        let input_file = rw::MmapBuf::from_path(&delta_filepath)?;
+        let src_file = rw::MmapBuf::from_path(src_filepath)?;
 
-            match dst_file {
-                Some(ref file) => {
-                    let dst_file = async_std::fs::File::create(file.path()).await?;
-                    delta::delta(mode, src_file, input_file, dst_file).await?
-                }
-                None => delta::delta(mode, src_file, input_file, futures::io::sink()).await?,
+        match dst_file {
+            Some(ref file) => {
+                let dst_file =
+                    rw::MmapBufMut::from_path_len(file.path(), blob.content_size as usize)?;
+                delta::delta(mode, src_file, input_file, dst_file).await?
             }
-        } else {
-            // mmap based
-            let input_file = rw::MmapBuf::from_path(&delta_filepath)?;
-            let src_file = rw::MmapBuf::from_path(src_filepath)?;
-
-            match dst_file {
-                Some(ref file) => {
-                    let dst_file =
-                        rw::MmapBufMut::from_path_len(file.path(), blob.content_size as usize)?;
-                    delta::delta(mode, src_file, input_file, dst_file).await?
-                }
-                None => delta::delta(mode, src_file, input_file, futures::io::sink()).await?,
-            }
+            None => delta::delta(mode, src_file, input_file, tokio::io::sink()).await?,
         }
     };
 

@@ -165,6 +165,7 @@ fn main() -> increstore::Result<()> {
     std::fs::create_dir_all(prefix()).expect("failed to create dir");
 
     let mut conn = db::open()?;
+
     let conn = &mut conn;
     db::prepare(conn).expect("failed to prepare");
 

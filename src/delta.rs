@@ -1,4 +1,7 @@
 use crate::rw::*;
+use std::marker::Unpin;
+use tokio::io::*;
+use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 pub use xdelta3::stream::ProcessMode;
 
@@ -10,9 +13,9 @@ pub async fn delta<R1, R2, W>(
     dst: W,
 ) -> std::io::Result<(WriteMetadata, WriteMetadata)>
 where
-    R1: async_std::io::Read + std::marker::Unpin,
-    R2: async_std::io::Read + std::marker::Unpin,
-    W: async_std::io::Write + std::marker::Unpin,
+    R1: AsyncRead + Unpin,
+    R2: AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
 {
     let mut input_reader = HashRW::new(input_reader);
     let mut dst = HashRW::new(dst);
@@ -22,7 +25,14 @@ where
         .no_compress(true)
         .level(0);
 
-    xdelta3::stream::process_async(cfg, op, &mut input_reader, src_reader, &mut dst).await?;
+    xdelta3::stream::process_async(
+        cfg,
+        op,
+        (&mut input_reader).compat(),
+        src_reader.compat(),
+        (&mut dst).compat_write(),
+    )
+    .await?;
 
     let input_meta = input_reader.meta();
     let dst_meta = dst.meta();

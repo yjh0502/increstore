@@ -2,7 +2,6 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-use futures::lock::*;
 use futures::prelude::*;
 use log::*;
 use pbr::ProgressBar;
@@ -56,7 +55,7 @@ fn zip_to_tar_par<P: AsRef<Path>, W: io::Write>(src_path: P, dst: W) -> io::Resu
         let file = std::fs::File::open(&src_path)?;
         let zipar = zip::ZipArchive::new(std::io::BufReader::new(file))?;
         file_len = zipar.len();
-        let file = Arc::new(Mutex::new(zipar));
+        let file = Arc::new(std::sync::RwLock::new(zipar));
         files.push(file);
     }
 
@@ -64,17 +63,20 @@ fn zip_to_tar_par<P: AsRef<Path>, W: io::Write>(src_path: P, dst: W) -> io::Resu
     for i in 0..file_len {
         let file_idx = i % PAR_JOBS;
         let file_lock = files[file_idx].clone();
-        f_list.push(async move {
-            let file = &mut file_lock.lock().await;
-            let res = zip_to_tarentry(file, i);
-            res
-        });
+        f_list.push((i, file_lock));
     }
 
     let mut pb = ProgressBar::new(file_len as u64);
     let mut ar = tar::Builder::new(dst);
     let res = stream::iter(f_list)
-        .map(|f| async_std::task::spawn(f))
+        .map(|(i, file_lock)| {
+            tokio::task::spawn_blocking(move || {
+                let file = &mut file_lock.write().expect("failed to acquire lock");
+                let res = zip_to_tarentry(file, i);
+                res
+            })
+            .map(|res| res.expect("failed to spawn"))
+        })
         .buffered(PAR_JOBS * 16)
         .try_fold((pb, ar), |(mut pb, mut ar), entry| {
             match ar.append(&entry.header, entry.data.as_slice()) {
@@ -86,7 +88,8 @@ fn zip_to_tar_par<P: AsRef<Path>, W: io::Write>(src_path: P, dst: W) -> io::Resu
             }
         });
 
-    let (mut pb, _ar) = async_std::task::block_on(res)?;
+    let rt = tokio::runtime::Runtime::new()?;
+    let (mut pb, _ar) = rt.block_on(res)?;
     pb.finish();
 
     Ok(())
