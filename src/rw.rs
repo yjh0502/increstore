@@ -15,6 +15,16 @@ pub struct WriteMetadata {
     hash0: SseHash,
 }
 
+fn digest_hex(bytes: [u64; 4]) -> String {
+    use std::fmt::Write;
+
+    let mut s = String::new();
+    for val in &bytes {
+        write!(&mut s, "{:016x}", val).unwrap();
+    }
+    s
+}
+
 impl WriteMetadata {
     pub fn new() -> Self {
         // TODO
@@ -42,13 +52,8 @@ impl WriteMetadata {
     }
 
     pub fn digest(&self) -> String {
-        use std::fmt::Write;
         let digest = self.hash0.clone().finalize256();
-        let mut s = String::new();
-        for val in &digest {
-            write!(&mut s, "{:016x}", val).unwrap();
-        }
-        s
+        digest_hex(digest)
     }
 
     pub fn len(&self) -> u64 {
@@ -366,17 +371,30 @@ mod test {
     use std::io::*;
 
     #[test]
-    fn hash_rw_write() {
+    fn hash_rw_ref() {
         let body = b"hello, world";
 
-        let dst = Vec::<u8>::new();
-        let mut rw = HashRW::new(dst);
+        let key = highway::Key([1, 2, 3, 4]);
+
+        let mut hash = SseHash::new(key).unwrap();
+        hash.append(&body[..]);
+        let digest = hash.finalize256();
+
+        assert_eq!(
+            digest_hex(digest),
+            "9be0f68afedc92f37c093966e0e2f9055cefa64b9567657a8af8f88eb280d6b2"
+        );
+    }
+
+    #[test]
+    fn hash_rw_write() {
+        let body = b"hello, world";
+        let mut rw = HashRW::new(Vec::new());
 
         rw.write_all(body).expect("failed to write");
 
-        let meta = rw.meta().digest();
         assert_eq!(
-            meta,
+            rw.meta().digest(),
             "9be0f68afedc92f37c093966e0e2f9055cefa64b9567657a8af8f88eb280d6b2"
         );
     }
@@ -390,9 +408,8 @@ mod test {
 
         rw.read_to_end(&mut dst).expect("failed to write");
 
-        let meta = rw.meta().digest();
         assert_eq!(
-            meta,
+            rw.meta().digest(),
             "9be0f68afedc92f37c093966e0e2f9055cefa64b9567657a8af8f88eb280d6b2"
         );
     }
