@@ -379,7 +379,7 @@ fn append_delta(
         let (_input_meta, dst_meta) = match res {
             Ok(s) => s,
             Err(e) => {
-                if e.kind() == io::ErrorKind::TimedOut {
+                if e.kind() == io::ErrorKind::Other {
                     // timeout from race
                     return Ok(None);
                 } else {

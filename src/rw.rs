@@ -214,6 +214,30 @@ impl<W> Drop for RaceWrite<W> {
     }
 }
 
+impl<W> std::io::Write for RaceWrite<W>
+where
+    W: std::io::Write,
+{
+    fn write(&mut self, buf: &[u8]) -> std::result::Result<usize, std::io::Error> {
+        let race_size = self.race.load(Ordering::SeqCst);
+        if race_size > 0 && race_size < self.size + buf.len() {
+            return Err(io::Error::new(io::ErrorKind::Other, "race"));
+        }
+
+        match self.w.write(buf) {
+            Ok(len) => {
+                self.size += len;
+                Ok(len)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
+        self.w.flush()
+    }
+}
+
 impl<W> tokio::io::AsyncWrite for RaceWrite<W>
 where
     W: tokio::io::AsyncWrite + Unpin,
@@ -233,7 +257,7 @@ where
                     Poll::Ready(Ok(n))
                 } else {
                     // TODO: use signal channel other than io::Error?
-                    Poll::Ready(Err(io::Error::new(io::ErrorKind::TimedOut, "race")))
+                    Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, "race")))
                 }
             }
             Err(e) => Poll::Ready(Err(e)),
@@ -412,5 +436,32 @@ mod test {
             rw.meta().digest(),
             "9be0f68afedc92f37c093966e0e2f9055cefa64b9567657a8af8f88eb280d6b2"
         );
+    }
+
+    #[test]
+    fn race() {
+        use std::io::Write;
+
+        let shared = Arc::new(AtomicUsize::new(0));
+
+        let mut r1 = RaceWrite::new(Vec::<u8>::new(), shared.clone());
+        let mut r2 = RaceWrite::new(Vec::<u8>::new(), shared.clone());
+
+        assert_eq!(shared.load(Ordering::SeqCst), 0);
+
+        assert!(r1.write_all(&[1, 2, 3, 4]).is_ok());
+        std::mem::drop(r1);
+
+        assert_eq!(shared.load(Ordering::SeqCst), 4);
+
+        assert!(r2.write_all(&[1, 2, 3, 4]).is_ok());
+
+        let res = r2.write_all(&[1]);
+        assert!(res.is_err());
+        let e = res.err().unwrap();
+
+        assert_eq!(e.kind(), io::ErrorKind::Other);
+
+        assert_eq!(shared.load(Ordering::SeqCst), 4);
     }
 }
