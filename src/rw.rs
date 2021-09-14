@@ -192,13 +192,11 @@ impl<W> RaceWrite<W> {
     pub fn new(w: W, race: Arc<AtomicUsize>) -> Self {
         Self { race, size: 0, w }
     }
-}
 
-impl<W> Drop for RaceWrite<W> {
-    fn drop(&mut self) {
+    fn update_race(&mut self) {
         let ordering = Ordering::SeqCst;
 
-        let mut value = self.race.load(Ordering::SeqCst);
+        let mut value = self.race.load(ordering);
         while value < self.size {
             if let Err(loaded) = self
                 .race
@@ -211,6 +209,12 @@ impl<W> Drop for RaceWrite<W> {
                 }
             }
         }
+    }
+}
+
+impl<W> Drop for RaceWrite<W> {
+    fn drop(&mut self) {
+        self.update_race()
     }
 }
 
@@ -272,7 +276,8 @@ where
 
     fn poll_shutdown(mut self: Pin<&mut Self>, ctx: &mut Context) -> Poll<io::Result<()>> {
         let mut s = self.as_mut();
-        s.race.store(s.size, Ordering::SeqCst);
+
+        s.update_race();
 
         let w = Pin::new(&mut s.w);
         w.poll_shutdown(ctx)
