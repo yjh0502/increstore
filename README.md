@@ -3,6 +3,7 @@
 ## build
 
 ```sh
+sudo apt install libsqlite3-dev
 cargo build --release
 ```
 
