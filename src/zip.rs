@@ -34,8 +34,12 @@ where
         }
     }
 
-    let unixtime = file.last_modified().to_time().to_timespec().sec;
-    header.set_mtime(unixtime as u64);
+    let unixtime = file
+        .last_modified()
+        .to_time()
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+        .unix_timestamp() as u64;
+    header.set_mtime(unixtime);
 
     header.set_cksum();
 
