@@ -123,9 +123,9 @@ where
             Some(ref file) => {
                 let dst_file =
                     rw::MmapBufMut::from_path_len(file.path(), blob.content_size as usize)?;
-                delta::delta(mode, src_file, input_file, dst_file).await?
+                delta::delta_async(mode, src_file, input_file, dst_file).await?
             }
-            None => delta::delta(mode, src_file, input_file, tokio::io::sink()).await?,
+            None => delta::delta_async(mode, src_file, input_file, tokio::io::sink()).await?,
         }
     };
 

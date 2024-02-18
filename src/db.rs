@@ -14,6 +14,9 @@ pub struct Blob {
     pub store_hash: String,
     pub content_hash: String,
     pub parent_hash: Option<String>,
+
+    // for push-tree
+    pub seq: u32,
 }
 
 impl Blob {
@@ -75,6 +78,8 @@ create table if not exists blobs (
     content_hash    text not null,
     parent_hash     text,
 
+    seq             integer,
+
     foreign key (parent_hash) references blobs (hash)
 
 )
@@ -90,7 +95,7 @@ pub fn all(conn: &mut Conn) -> Result<Vec<Blob>> {
         r#"
 select
     id, filename, time_created,
-    store_size, content_size, store_hash, content_hash, parent_hash
+    store_size, content_size, store_hash, content_hash, parent_hash, seq
 from blobs
 "#,
     )?;
@@ -107,7 +112,7 @@ pub fn by_filename(conn: &mut Conn, filename: &str) -> Result<Vec<Blob>> {
         r#"
 select
     id, filename, time_created,
-    store_size, content_size, store_hash, content_hash, parent_hash
+    store_size, content_size, store_hash, content_hash, parent_hash, seq
 from blobs
 where filename = ?
 "#,
@@ -125,7 +130,7 @@ pub fn by_content_hash(conn: &mut Conn, content_hash: &str) -> Result<Vec<Blob>>
         r#"
 select
     id, filename, time_created,
-    store_size, content_size, store_hash, content_hash, parent_hash
+    store_size, content_size, store_hash, content_hash, parent_hash, seq
 from blobs
 where content_hash = ?
 "#,
@@ -151,6 +156,8 @@ fn decode_row(row: &rusqlite::Row) -> Result<Blob> {
         content_hash: row.get(6)?,
 
         parent_hash: row.get(7)?,
+
+        seq: row.get(8)?,
     })
 }
 
@@ -159,7 +166,7 @@ pub fn latest(conn: &mut Conn) -> Result<Blob> {
         r#"
 select
     id, filename, time_created,
-    store_size, content_size, store_hash, content_hash, parent_hash
+    store_size, content_size, store_hash, content_hash, parent_hash, seq
 from blobs
 order by id desc
 limit 1"#,
@@ -178,9 +185,10 @@ insert or ignore into blobs (
     content_size,
     store_hash,
     content_hash,
-    parent_hash
+    parent_hash,
+    seq
 )
-    values (?1, ?2, ?3, ?4, ?5, ?6, ?7)"#,
+    values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"#,
         params![
             blob.filename,
             blob.time_created,
@@ -188,7 +196,8 @@ insert or ignore into blobs (
             blob.content_size as i64,
             blob.store_hash,
             blob.content_hash,
-            blob.parent_hash
+            blob.parent_hash,
+            blob.seq
         ],
     )?;
 
@@ -220,7 +229,7 @@ pub fn roots(conn: &mut Conn) -> Result<Vec<Blob>> {
         r#"
 select
     id, filename, time_created,
-    store_size, content_size, store_hash, content_hash, parent_hash
+    store_size, content_size, store_hash, content_hash, parent_hash, seq
 from blobs
 where parent_hash is null
 "#,
@@ -231,4 +240,16 @@ where parent_hash is null
         rows.push(row_res?);
     }
     Ok(rows)
+}
+
+pub fn seq(conn: &mut Conn) -> Result<u32> {
+    let mut stmt = conn.prepare(r#"select max(seq) from blobs"#)?;
+
+    let seq = if let Some(row) = stmt.query(params![])?.next()? {
+        let seq: u32 = row.get(0)?;
+        seq + 1
+    } else {
+        0
+    };
+    Ok(seq)
 }

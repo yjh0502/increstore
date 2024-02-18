@@ -29,6 +29,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum FileType {
     Zip,
     Gz,
+    Xz,
+    Zstd,
+    // TODO
+    Xdelta,
     Plain,
 }
 
@@ -133,7 +137,7 @@ pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: boo
             let input_file = File::open(&delta_filepath).await?;
             let dst_file = File::create(tmpfile.path()).await?;
 
-            delta::delta(
+            delta::delta_async(
                 delta::ProcessMode::Decode,
                 BufReader::with_capacity(BUF_SIZE, src_file),
                 BufReader::with_capacity(BUF_SIZE, input_file),
@@ -304,35 +308,90 @@ pub fn cleanup(conn: &mut db::Conn) -> Result<()> {
     Ok(())
 }
 
-fn store_blob<F>(input_filepath: &str, f: F) -> Result<Blob>
+fn store_blob<F>(filename: Option<&str>, input_filepath: &str, f: F) -> Result<Blob>
 where
     F: FnOnce(&Path, &Path) -> std::io::Result<WriteMetadata>,
 {
-    let input_filename = Path::new(&input_filepath)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let filename = filename.unwrap_or_else(|| {
+        Path::new(&input_filepath)
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+    });
 
     let tmp_dir = tmpdir();
     let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
 
     let meta = f(Path::new(input_filepath), tmp_unzip_path.path())?;
 
-    let input_blob = meta.blob(input_filename);
+    let input_blob = meta.blob(filename);
     let store_filepath = filepath(&input_blob.store_hash);
     store_object(tmp_unzip_path, &store_filepath)?;
     Ok(input_blob)
 }
 
-fn append_full(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<Option<Blob>> {
+fn store_blob_raw<R>(input_filepath: &str, read: R) -> Result<Blob>
+where
+    R: std::io::Read,
+{
+    let tmp_dir = tmpdir();
+    let tmp_unzip_path = NamedTempFile::new_in(&tmp_dir)?;
+
+    let meta = gz::store_raw(read, tmp_unzip_path.path())?;
+
+    let input_blob = meta.blob(input_filepath);
+    let store_filepath = filepath(&input_blob.store_hash);
+    store_object(tmp_unzip_path, &store_filepath)?;
+    Ok(input_blob)
+}
+
+fn append_full(
+    conn: &mut db::Conn,
+    filename: Option<&str>,
+    src_blob: Option<&Blob>,
+    input_filepath: &str,
+    ty: FileType,
+    seq: u32,
+) -> Result<Option<Blob>> {
     trace!("append_full: input_filepath={} ty={:?}", input_filepath, ty);
 
-    let blob = match ty {
-        FileType::Zip => store_blob(input_filepath, |p1, p2| store_zip(p1, p2, true))?,
-        FileType::Gz => store_blob(input_filepath, |p1, p2| gz::store_gz(p1, p2))?,
-        FileType::Plain => store_blob(input_filepath, |p1, p2| gz::store_plain(p1, p2))?,
+    let mut blob = match ty {
+        FileType::Zip => store_blob(filename, input_filepath, |p1, p2| store_zip(p1, p2, true))?,
+        FileType::Gz => store_blob(filename, input_filepath, |p1, p2| gz::store_gz(p1, p2))?,
+        FileType::Xz => store_blob(filename, input_filepath, |p1, p2| gz::store_xz(p1, p2))?,
+        FileType::Zstd => store_blob(filename, input_filepath, |p1, p2| gz::store_zstd(p1, p2))?,
+        FileType::Xdelta => {
+            let blob = src_blob.unwrap();
+            let src_filepath = filepath(&blob.content_hash);
+
+            store_blob(filename, input_filepath, |p1, p2| {
+                gz::store_delta(&src_filepath, p1, p2)
+            })?
+        }
+        FileType::Plain => store_blob(filename, input_filepath, |p1, p2| gz::store_plain(p1, p2))?,
     };
+    blob.seq = seq;
+    if db::insert(conn, &blob)? {
+        Ok(Some(blob))
+    } else {
+        Ok(None)
+    }
+}
+
+fn append_full_raw<R>(
+    conn: &mut db::Conn,
+    input_filepath: &str,
+    read: R,
+    seq: u32,
+) -> Result<Option<Blob>>
+where
+    R: std::io::Read,
+{
+    trace!("append_full_raw: input_filepath={}", input_filepath);
+
+    let mut blob = store_blob_raw(input_filepath, read)?;
+    blob.seq = seq;
     if db::insert(conn, &blob)? {
         Ok(Some(blob))
     } else {
@@ -367,7 +426,7 @@ fn append_delta(
 
             let race = RaceWrite::new(BufWriter::with_capacity(BUF_SIZE, dst_file), race);
 
-            delta::delta(
+            delta::delta_async(
                 delta::ProcessMode::Encode,
                 BufReader::with_capacity(BUF_SIZE, src_file),
                 BufReader::with_capacity(BUF_SIZE, input_file),
@@ -392,6 +451,7 @@ fn append_delta(
         blob.content_size = input_blob.content_size;
         blob.content_hash = input_blob.content_hash.clone();
         blob.parent_hash = Some(src_hash.to_owned());
+        blob.seq = input_blob.seq;
 
         trace!(
             "content_hash={}, store_hash={}",
@@ -422,10 +482,9 @@ fn ratio_summary(blobs: &[(NamedTempFile, Blob)]) -> String {
 pub fn push(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<()> {
     debug!("push: input_filepath={}", input_filepath);
 
-    let root_blobs = db::roots(conn)?;
-
     let sw = Stopwatch::start_new();
-    let input_blob = match append_full(conn, input_filepath, ty)? {
+    let root_blobs = db::roots(conn)?;
+    let input_blob = match append_full(conn, None, None, input_filepath, ty, 0)? {
         Some(blob) => blob,
         None => {
             info!("push: content already exists, skipping");
@@ -452,16 +511,149 @@ pub fn push(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<(
 
     debug!("compression ratio: {}", ratio_summary(&link_blobs));
 
-    let (tmp_path, blob) = link_blobs.into_iter().next().expect("no blobs");
+    let (link_path, link_blob) = link_blobs.into_iter().next().expect("no blobs");
     // optimal block
-    if !update_blob(conn, tmp_path, &blob)? {
+    if !update_blob(conn, link_path, &link_blob)? {
         info!(
             "append_delta: failed to insert, store_hash={}",
-            blob.store_hash
+            link_blob.store_hash
         );
     }
 
     cleanup(conn)?;
+
+    Ok(())
+}
+
+pub fn push_tree(
+    conn: &mut db::Conn,
+    input_filename: Option<&str>,
+    src_blob: Option<&Blob>,
+    input_filepath: &str,
+    ty: FileType,
+) -> Result<Blob> {
+    let sw = Stopwatch::start_new();
+
+    let root_blobs = db::roots(conn)?;
+    let seq = if root_blobs.is_empty() {
+        0
+    } else {
+        db::seq(conn)?
+    };
+    let input_blob = match append_full(
+        conn,
+        input_filename.as_deref(),
+        src_blob,
+        input_filepath,
+        ty,
+        seq,
+    )? {
+        Some(blob) => blob,
+        None => {
+            failure::bail!("push_tree: content already exists, skipping");
+        }
+    };
+    info!("push_tree: append_full={}ms", sw.elapsed_ms(),);
+
+    if root_blobs.is_empty() {
+        return Ok(input_blob);
+    }
+
+    let parent_seq = seq & (seq - 1);
+    let (link_path, link_blob) = match root_blobs.iter().find(|b| b.seq == parent_seq) {
+        None => {
+            failure::bail!("parent not found")
+        }
+        Some(parent_blob) => {
+            let race = Arc::new(AtomicUsize::new(0));
+            match append_delta(&input_blob, &parent_blob, race.clone())? {
+                None => {
+                    failure::bail!("failed to append_delta")
+                }
+                Some(res) => res,
+            }
+        }
+    };
+    if !update_blob(conn, link_path, &link_blob)? {
+        info!(
+            "append_delta: failed to insert, store_hash={}",
+            link_blob.store_hash
+        );
+    }
+
+    // TODO: cleanup roots
+    let mut live_seqs = vec![];
+    let mut live_seq = seq;
+    loop {
+        live_seqs.push(live_seq);
+        if live_seq == 0 {
+            break;
+        }
+        live_seq = live_seq & (live_seq - 1);
+    }
+
+    for root_blob in root_blobs {
+        if !live_seqs.contains(&root_blob.seq) {
+            eprintln!("cleanup: {}", root_blob.seq);
+            db::remove(conn, &root_blob)?;
+            std::fs::remove_file(&filepath(&root_blob.content_hash))?;
+        }
+    }
+
+    Ok(input_blob)
+}
+
+pub fn push_tree_dir(conn: &mut db::Conn, input_dir: &str) -> Result<()> {
+    let mut files = vec![];
+    for file in std::fs::read_dir(input_dir)? {
+        let path = file?.path();
+        if path.ends_with("checksum") {
+            continue;
+        }
+        files.push(path);
+    }
+    files.sort();
+    info!("files={:?}", files);
+
+    let root = files.remove(0);
+    let root_name_raw =root.file_name().unwrap().to_str().unwrap(); 
+    let filetype = if root_name_raw.ends_with("xz") {
+        FileType::Xz
+    } else if root_name_raw.ends_with("zst") {
+        FileType::Zstd
+    } else {
+        failure::bail!("unknown filetype: {:?}", root_name_raw);
+    };
+
+    let root_name = root.file_stem().unwrap().to_str().unwrap().to_owned();
+
+    info!("root={:?}", root);
+
+    let blob_next = push_tree(
+        conn,
+        Some(&root_name),
+        None,
+        root.to_str().unwrap(),
+        filetype
+    )?;
+    let mut blob = Some(blob_next);
+
+    for file in files {
+        info!("file={:?}", file);
+        let file_name = file.file_stem().unwrap().to_str().unwrap().to_owned();
+        if file_name == "checksum" {
+            continue;
+        }
+
+        let blob_next = push_tree(
+            conn,
+            Some(&file_name),
+            blob.as_ref(),
+            file.to_str().unwrap(),
+            FileType::Xdelta,
+        )?;
+        blob = Some(blob_next);
+    }
 
     Ok(())
 }
@@ -526,7 +718,7 @@ pub fn debug_graph(conn: &mut db::Conn, filename: &str) -> Result<()> {
         .ok();
     }
 
-    {
+    if false {
         let spine = stats.spine();
 
         for (idx, pair) in spine.windows(2).enumerate() {

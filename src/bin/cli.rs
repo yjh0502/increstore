@@ -1,4 +1,5 @@
 use argh::FromArgs;
+use increstore::FileType;
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// Top-level command.
@@ -11,6 +12,8 @@ struct TopLevel {
 #[argh(subcommand)]
 enum MySubCommandEnum {
     Push(SubCommandPush),
+    PushTree(SubCommandPushTree),
+    PushTreeDir(SubCommandPushTreeDir),
     Get(SubCommandGet),
     Exists(SubCommandExists),
 
@@ -44,6 +47,51 @@ struct SubCommandPush {
     is_zip: bool,
     #[argh(description = "gz", switch)]
     is_gz: bool,
+}
+
+fn ty(filename: &str, is_zip: bool, is_gz: bool) -> FileType {
+    match (is_zip, is_gz) {
+        (true, true) => {
+            panic!("should not specify both zip and gz");
+        }
+        (true, false) => FileType::Zip,
+        (false, true) => FileType::Gz,
+        (false, false) => {
+            let path = std::path::Path::new(filename);
+            if let Some(ext) = path.extension() {
+                if ext == "zip" || ext == "apk" || ext == "aab" {
+                    FileType::Zip
+                } else if ext == "gz" {
+                    FileType::Gz
+                } else {
+                    FileType::Plain
+                }
+            } else {
+                FileType::Plain
+            }
+        }
+    }
+}
+
+/// push a version to archive
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "push-tree")]
+struct SubCommandPushTree {
+    #[argh(positional)]
+    filename: String,
+
+    #[argh(description = "zip", switch)]
+    is_zip: bool,
+    #[argh(description = "gz", switch)]
+    is_gz: bool,
+}
+
+/// push a version to archive
+#[derive(FromArgs, PartialEq, Debug)]
+#[argh(subcommand, name = "push-tree-dir")]
+struct SubCommandPushTreeDir {
+    #[argh(positional)]
+    dir: String,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -173,31 +221,18 @@ fn main() -> increstore::Result<()> {
 
     match up.nested {
         MySubCommandEnum::Push(cmd) => {
-            let ty = match (cmd.is_zip, cmd.is_gz) {
-                (true, true) => {
-                    panic!("should not specify both zip and gz");
-                }
-                (true, false) => FileType::Zip,
-                (false, true) => FileType::Gz,
-                (false, false) => {
-                    let path = std::path::Path::new(&cmd.filename);
-                    if let Some(ext) = path.extension() {
-                        if ext == "zip" || ext == "apk" || ext == "aab" {
-                            FileType::Zip
-                        } else if ext == "gz" {
-                            FileType::Gz
-                        } else if ext == "tar" {
-                            FileType::Plain
-                        } else {
-                            panic!("unknown extension: {:?}", ext);
-                        }
-                    } else {
-                        panic!("unknown extension: {}", cmd.filename);
-                    }
-                }
-            };
+            let ty = ty(&cmd.filename, cmd.is_zip, cmd.is_gz);
             push(conn, &cmd.filename, ty)
         }
+        MySubCommandEnum::PushTree(cmd) => {
+            let ty = ty(&cmd.filename, cmd.is_zip, cmd.is_gz);
+            push_tree(conn, None, None, &cmd.filename, ty)?;
+            Ok(())
+        }
+        MySubCommandEnum::PushTreeDir(cmd) => {
+            push_tree_dir(conn, &cmd.dir)
+        }
+
         MySubCommandEnum::Get(cmd) => get(conn, &cmd.filename, &cmd.out_filename, cmd.dry_run),
         MySubCommandEnum::Exists(cmd) => exists(conn, &cmd.filename),
 

@@ -48,6 +48,7 @@ impl WriteMetadata {
             store_hash: digest.clone(),
             content_hash: digest.clone(),
             parent_hash: None,
+            seq: 0,
         }
     }
 
