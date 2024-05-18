@@ -92,6 +92,9 @@ struct SubCommandPushTree {
 struct SubCommandPushTreeDir {
     #[argh(positional)]
     dir: String,
+
+    #[argh(description = "prefix", option)]
+    prefix: String,
 }
 
 #[derive(FromArgs, PartialEq, Debug)]
@@ -230,7 +233,7 @@ fn main() -> increstore::Result<()> {
             Ok(())
         }
         MySubCommandEnum::PushTreeDir(cmd) => {
-            push_tree_dir(conn, &cmd.dir)
+            push_tree_dir(conn, &cmd.dir, &cmd.prefix)
         }
 
         MySubCommandEnum::Get(cmd) => get(conn, &cmd.filename, &cmd.out_filename, cmd.dry_run),

@@ -603,11 +603,13 @@ pub fn push_tree(
     Ok(input_blob)
 }
 
-pub fn push_tree_dir(conn: &mut db::Conn, input_dir: &str) -> Result<()> {
+pub fn push_tree_dir(conn: &mut db::Conn, input_dir: &str, prefix: &str) -> Result<()> {
     let mut files = vec![];
     for file in std::fs::read_dir(input_dir)? {
         let path = file?.path();
-        if path.ends_with("checksum") {
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        if !filename.starts_with(prefix) {
+            debug!("ignoring file: {:?}", path);
             continue;
         }
         files.push(path);
