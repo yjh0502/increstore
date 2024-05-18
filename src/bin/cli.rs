@@ -34,6 +34,9 @@ enum MySubCommandEnum {
     ListFiles(SubCommandListFiles),
     Blobs(SubCommandBlobs),
     Hash(SubCommandHash),
+
+    Pop(SubCommandPop),
+    Check(SubCommandCheck),
 }
 
 /// push a version to archive
@@ -208,6 +211,18 @@ struct SubCommandHash {
     filename: String,
 }
 
+#[derive(FromArgs, PartialEq, Debug)]
+/// debug-pop
+#[argh(subcommand, name = "debug-pop")]
+struct SubCommandPop {
+}
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// debug-check
+#[argh(subcommand, name = "debug-check")]
+struct SubCommandCheck {
+}
+
 fn main() -> increstore::Result<()> {
     use increstore::*;
 
@@ -227,10 +242,13 @@ fn main() -> increstore::Result<()> {
             let ty = ty(&cmd.filename, cmd.is_zip, cmd.is_gz);
             push(conn, &cmd.filename, ty)
         }
-        MySubCommandEnum::PushTree(cmd) => {
+        MySubCommandEnum::PushTree(_cmd) => {
+            todo!();
+            /*
             let ty = ty(&cmd.filename, cmd.is_zip, cmd.is_gz);
             push_tree(conn, None, None, &cmd.filename, ty)?;
             Ok(())
+            */
         }
         MySubCommandEnum::PushTreeDir(cmd) => {
             push_tree_dir(conn, &cmd.dir, &cmd.prefix)
@@ -258,5 +276,8 @@ fn main() -> increstore::Result<()> {
         }
         MySubCommandEnum::Blobs(_cmd) => debug_blobs(conn),
         MySubCommandEnum::Hash(cmd) => debug_hash(&cmd.filename),
+
+        MySubCommandEnum::Pop(_cmd) => debug_pop(),
+        MySubCommandEnum::Check(_cmd) => debug_check(conn),
     }
 }

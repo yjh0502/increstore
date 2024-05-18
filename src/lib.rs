@@ -379,6 +379,7 @@ fn append_full(
     }
 }
 
+#[allow(unused)]
 fn append_full_raw<R>(
     conn: &mut db::Conn,
     input_filepath: &str,
@@ -527,12 +528,30 @@ pub fn push(conn: &mut db::Conn, input_filepath: &str, ty: FileType) -> Result<(
 
 pub fn push_tree(
     conn: &mut db::Conn,
-    input_filename: Option<&str>,
+    input_filename: &str,
     src_blob: Option<&Blob>,
     input_filepath: &str,
     ty: FileType,
 ) -> Result<Blob> {
     let sw = Stopwatch::start_new();
+
+    // file already exists, returns existing blob
+    if let Ok(mut blobs) = db::by_filename(conn, input_filename) {
+        if blobs.len() > 0 {
+            // try to return ROOT blob
+            if let Some(root_idx) = blobs.iter().position(|b| b.is_root()) {
+                return Ok(blobs.remove(root_idx));
+            } else {
+                return Ok(blobs.remove(0));
+            }
+        }
+    }
+
+    if let Some(src_blob) = src_blob {
+        if !src_blob.is_root() {
+            failure::bail!("push_tree: src_blob is not root");
+        }
+    }
 
     let root_blobs = db::roots(conn)?;
     let seq = if root_blobs.is_empty() {
@@ -542,7 +561,7 @@ pub fn push_tree(
     };
     let input_blob = match append_full(
         conn,
-        input_filename.as_deref(),
+        Some(input_filename),
         src_blob,
         input_filepath,
         ty,
@@ -618,7 +637,7 @@ pub fn push_tree_dir(conn: &mut db::Conn, input_dir: &str, prefix: &str) -> Resu
     info!("files={:?}", files);
 
     let root = files.remove(0);
-    let root_name_raw =root.file_name().unwrap().to_str().unwrap(); 
+    let root_name_raw = root.file_name().unwrap().to_str().unwrap();
     let filetype = if root_name_raw.ends_with("xz") {
         FileType::Xz
     } else if root_name_raw.ends_with("zst") {
@@ -633,10 +652,10 @@ pub fn push_tree_dir(conn: &mut db::Conn, input_dir: &str, prefix: &str) -> Resu
 
     let blob_next = push_tree(
         conn,
-        Some(&root_name),
+        &root_name,
         None,
         root.to_str().unwrap(),
-        filetype
+        filetype,
     )?;
     let mut blob = Some(blob_next);
 
@@ -649,7 +668,7 @@ pub fn push_tree_dir(conn: &mut db::Conn, input_dir: &str, prefix: &str) -> Resu
 
         let blob_next = push_tree(
             conn,
-            Some(&file_name),
+            &file_name,
             blob.as_ref(),
             file.to_str().unwrap(),
             FileType::Xdelta,
@@ -909,6 +928,61 @@ fn file_hash(filename: &str) -> Result<String> {
 pub fn debug_hash(filename: &str) -> Result<()> {
     let hash = file_hash(filename)?;
     println!("{}", hash);
+
+    Ok(())
+}
+
+pub fn debug_pop() -> Result<()> {
+    Ok(())
+}
+
+pub fn debug_check(conn: &mut db::Conn) -> Result<()> {
+    let blobs = db::all(conn)?;
+
+    let mut file_blobs = std::collections::HashMap::new();
+    let mut child_hashes = std::collections::HashMap::new();
+
+    for blob in &blobs {
+        if let Some(parent_hash) = &blob.parent_hash {
+            let parent_hash = parent_hash.clone();
+            let children = child_hashes.entry(parent_hash).or_insert_with(Vec::new);
+            children.push(blob.content_hash.clone());
+        }
+
+        {
+            let filename = blob.filename.clone();
+            let hashes = file_blobs.entry(filename).or_insert_with(Vec::new);
+            hashes.push(blob.content_hash.clone());
+        }
+
+        let filename = filepath(&blob.store_hash);
+        if !std::path::Path::new(&filename).exists() {
+            error!("file not exists: filename={}, blob={:?}", filename, blob);
+        }
+    }
+
+    for (filename, hashes) in file_blobs {
+        if hashes.len() == 1 {
+            continue;
+        }
+        error!(
+            "multiple hashes: filename={}, hashes={:?}",
+            filename, hashes
+        );
+
+        for (i, hash) in hashes.into_iter().enumerate() {
+            let blob = blobs.iter().find(|b| b.content_hash == hash).unwrap();
+            error!("  {}: {:?}", i, blob);
+        }
+    }
+
+    /*
+    for (parent, children) in child_hashes {
+        if children.len() > 1 {
+            error!("multiple children: parent={}, children={:?}", parent, children);
+        }
+    }
+    */
 
     Ok(())
 }
