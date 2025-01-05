@@ -34,12 +34,13 @@ where
         }
     }
 
-    let unixtime = file
-        .last_modified()
-        .to_time()
-        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
-        .unix_timestamp() as u64;
-    header.set_mtime(unixtime);
+    if let Some(t) = file.last_modified() {
+        use std::convert::TryFrom;
+
+        if let Ok(unixtime) = time::OffsetDateTime::try_from(t) {
+            header.set_mtime(unixtime.unix_timestamp() as u64);
+        }
+    }
 
     header.set_cksum();
 
