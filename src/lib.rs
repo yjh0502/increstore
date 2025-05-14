@@ -294,14 +294,14 @@ pub fn cleanup(conn: &mut db::Conn) -> Result<()> {
     }
 
     let mut root_indices = vec![];
-    for root_blob in &root_candidates.iter().limit(max_root_blobs()) {
+    for root_blob in root_candidates.iter().take(max_root_blobs()) {
         root_indices.push(root_blob.blob.id);
     }
-    let mut latest_id = None;
+    let mut latest_id: Option<u32> = None;
     for root_blob in &root_candidates {
-        if let Some(latest_id) = latest_id {
-            if root_blob.blob.id > latest_id {
-                latest_id = Some(root_blob.blob.id);
+        if let Some(ref mut latest_id) = latest_id {
+            if root_blob.blob.id > *latest_id {
+                *latest_id = root_blob.blob.id;
             }
         }
     }
