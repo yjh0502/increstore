@@ -293,9 +293,28 @@ pub fn cleanup(conn: &mut db::Conn) -> Result<()> {
         debug!("root compression ratio: {}", s);
     }
 
-    // TODO: store distances
+    let mut root_indices = vec![];
+    for root_blob in &root_candidates.iter().limit(max_root_blobs()) {
+        root_indices.push(root_blob.blob.id);
+    }
+    let mut latest_id = None;
+    for root_blob in &root_candidates {
+        if let Some(latest_id) = latest_id {
+            if root_blob.blob.id > latest_id {
+                latest_id = Some(root_blob.blob.id);
+            }
+        }
+    }
+    if let Some(latest_id) = latest_id {
+        root_indices.push(latest_id);
+    }
 
-    for root_blob in root_candidates.into_iter().skip(max_root_blobs()) {
+    // TODO: store distances
+    for root_blob in root_candidates.into_iter() {
+        if root_indices.contains(&root_blob.blob.id) {
+            continue;
+        }
+
         let root = root_blob.blob;
         db::remove(conn, &root)?;
         std::fs::remove_file(&filepath(&root.content_hash))?;
