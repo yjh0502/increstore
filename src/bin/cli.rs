@@ -13,6 +13,7 @@ enum MySubCommandEnum {
     Push(SubCommandPush),
     Get(SubCommandGet),
     Exists(SubCommandExists),
+    Cleanup0(SubCommandCleanup0),
 
     Rename(SubCommandRename),
 
@@ -77,6 +78,11 @@ struct SubCommandExists {
     #[argh(positional)]
     filename: String,
 }
+
+#[derive(FromArgs, PartialEq, Debug)]
+/// check if a version with given name already exists in archive
+#[argh(subcommand, name = "cleanup0")]
+struct SubCommandCleanup0 {}
 
 #[derive(FromArgs, PartialEq, Debug)]
 /// Remove all frontier versions from archive. The archive should be hydrated before adding a new
@@ -165,13 +171,14 @@ fn main() -> increstore::Result<()> {
     std::fs::create_dir_all(prefix()).expect("failed to create dir");
 
     let mut conn = db::open()?;
-
     let conn = &mut conn;
     db::prepare(conn).expect("failed to prepare");
 
+    conn.execute("BEGIN IMMEDIATE TRANSACTION", [])?;
+
     let up: TopLevel = argh::from_env();
 
-    match up.nested {
+    let res = match up.nested {
         MySubCommandEnum::Push(cmd) => {
             let ty = match (cmd.is_zip, cmd.is_gz) {
                 (true, true) => {
@@ -200,6 +207,7 @@ fn main() -> increstore::Result<()> {
         }
         MySubCommandEnum::Get(cmd) => get(conn, &cmd.filename, &cmd.out_filename, cmd.dry_run),
         MySubCommandEnum::Exists(cmd) => exists(conn, &cmd.filename),
+        MySubCommandEnum::Cleanup0(_cmd) => cleanup0(conn),
 
         MySubCommandEnum::Rename(cmd) => rename(conn, &cmd.from_filename, &cmd.to_filename),
 
@@ -220,5 +228,13 @@ fn main() -> increstore::Result<()> {
         }
         MySubCommandEnum::Blobs(_cmd) => debug_blobs(conn),
         MySubCommandEnum::Hash(cmd) => debug_hash(&cmd.filename),
-    }
+    };
+
+    if res.is_ok() {
+        conn.execute("COMMIT TRANSACTION", [])?;
+    } else {
+        conn.execute("ROLLBACK TRANSACTION", [])?;
+    };
+
+    res
 }

@@ -1,8 +1,6 @@
-use std::io;
 use std::path::*;
 
 pub use failure::Error;
-use futures::prelude::*;
 use log::*;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
@@ -47,8 +45,12 @@ pub fn tmpdir() -> String {
     tmp_dir
 }
 
+fn filerootpath() -> String {
+    format!("{}/objects", prefix()).into()
+}
+
 fn filepath(s: &str) -> String {
-    format!("{}/objects/{}/{}", prefix(), &s[..2], &s[2..]).into()
+    format!("{}/{}/{}", filerootpath(), &s[..2], &s[2..]).into()
 }
 
 fn store_object<P>(src_path: NamedTempFile, dst_path: P) -> Result<()>
@@ -79,8 +81,6 @@ fn update_blob(conn: &mut db::Conn, tmp_path: NamedTempFile, blob: &Blob) -> Res
     // TODO: update id
     db::insert(conn, blob).map_err(Error::from)
 }
-
-const BUF_SIZE: usize = 16 * 1024 * 1024;
 
 pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
     let mut blob = match db::by_filename(conn, filename)?.pop() {
@@ -119,28 +119,18 @@ pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: boo
     let mut old_tmpfile = NamedTempFile::new_in(&tmp_dir)?;
     let mut tmpfile = NamedTempFile::new_in(&tmp_dir)?;
 
-    let rt = tokio::runtime::Runtime::new()?;
     let mut src_filepath = PathBuf::from(filepath(&blob.content_hash));
     for delta_blob in decode_path {
-        use tokio::fs::File;
-        use tokio::io::*;
-
         let delta_filepath = filepath(&delta_blob.store_hash);
         debug!("decode filename={}", delta_blob.filename);
         debug!("trace={:?}, input={:?}", src_filepath, delta_filepath);
-        let (_input_meta, dst_meta) = rt.block_on(async {
-            let src_file = File::open(&src_filepath).await?;
-            let input_file = File::open(&delta_filepath).await?;
-            let dst_file = File::create(tmpfile.path()).await?;
-
-            delta::delta(
-                delta::ProcessMode::Decode,
-                BufReader::with_capacity(BUF_SIZE, src_file),
-                BufReader::with_capacity(BUF_SIZE, input_file),
-                BufWriter::with_capacity(BUF_SIZE, dst_file),
-            )
-            .await
-        })?;
+        let dst_meta = delta::delta_file(
+            delta::ProcessMode::Decode,
+            src_filepath,
+            delta_filepath,
+            tmpfile.path(),
+        )?
+        .expect("should not fail");
 
         trace!("delta.content_hash={}", delta_blob.content_hash);
         trace!("dst.content_hash  ={}", dst_meta.digest());
@@ -164,6 +154,47 @@ pub fn exists(conn: &mut db::Conn, filename: &str) -> Result<()> {
     } else {
         println!("{}", blobs[0].store_hash);
     }
+    Ok(())
+}
+
+pub fn cleanup0(conn: &mut db::Conn) -> Result<()> {
+    use std::collections::HashSet;
+
+    // find all blobs
+    let root = filerootpath();
+    let files = walkdir::WalkDir::new(&root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| -> Result<String> {
+            // relative path
+            let path = e.path();
+            let relative_str = path.to_str().ok_or_else(|| {
+                Error::from(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "failed to convert path to str",
+                ))
+            })?;
+            Ok(relative_str.to_owned())
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let mut expected_files = HashSet::new();
+    for blob in db::all(conn)? {
+        if blob.is_genesis() || !blob.is_root() {
+            expected_files.insert(filepath(&blob.store_hash));
+        }
+    }
+
+    for file in files {
+        if expected_files.contains(&file) {
+            continue;
+        }
+
+        eprintln!("unknown file, delete: path={}", file);
+        std::fs::remove_file(&file).ok();
+    }
+
     Ok(())
 }
 
@@ -366,7 +397,6 @@ fn append_delta(
     src_blob: &Blob,
     race: Arc<AtomicUsize>,
 ) -> Result<Option<(NamedTempFile, Blob)>> {
-    let rt = tokio::runtime::Runtime::new()?;
     let sw = Stopwatch::start_new();
     let input_filepath = filepath(&input_blob.content_hash);
 
@@ -377,33 +407,42 @@ fn append_delta(
         let src_hash = &src_blob.content_hash;
         let src_filepath = filepath(src_hash);
 
-        let res = rt.block_on(async {
-            use tokio::{fs::File, io::*};
+        let mut handle = delta::delta_file_handle(
+            delta::ProcessMode::Encode,
+            src_filepath,
+            input_filepath,
+            tmp_path.path(),
+        )?;
 
-            let src_file = File::open(&src_filepath).await?;
-            let input_file = File::open(&input_filepath).await?;
-            let dst_file = File::create(tmp_path.path()).await?;
+        while let None = handle.try_wait()? {
+            // sleep for 1 second
+            std::thread::sleep(std::time::Duration::from_millis(1000));
 
-            let race = RaceWrite::new(BufWriter::with_capacity(BUF_SIZE, dst_file), race);
-
-            delta::delta(
-                delta::ProcessMode::Encode,
-                BufReader::with_capacity(BUF_SIZE, src_file),
-                BufReader::with_capacity(BUF_SIZE, input_file),
-                race,
-            )
-            .await
-        });
-
-        let (_input_meta, dst_meta) = match res {
-            Ok(s) => s,
-            Err(e) => {
-                if e.kind() == io::ErrorKind::Other {
-                    // timeout from race
+            // check output file size
+            if let Ok(metadata) = std::fs::metadata(tmp_path.path()) {
+                let len = metadata.len();
+                let loaded = race.load(std::sync::atomic::Ordering::Relaxed);
+                if loaded > 0 && len > loaded as u64 {
+                    handle.kill()?;
                     return Ok(None);
-                } else {
-                    return Err(e.into());
                 }
+            }
+        }
+
+        {
+            let metadata = std::fs::metadata(tmp_path.path())?;
+            let loaded = race.load(std::sync::atomic::Ordering::Relaxed);
+            if loaded < metadata.len() as usize {
+                race.store(
+                    metadata.len() as usize,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
+        }
+        let dst_meta = match handle.meta()? {
+            Some(meta) => meta,
+            None => {
+                return Ok(None);
             }
         };
 

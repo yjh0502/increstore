@@ -30,7 +30,6 @@ pub struct Stats {
     // depths
     pub blobs: Vec<Blob>,
     pub depths: Vec<GraphNode>,
-    pub alias_indices: Vec<usize>,
 }
 
 impl Stats {
