@@ -20,7 +20,13 @@ where
     let filename = file.name().to_owned();
 
     let mut header = tar::Header::new_ustar();
-    header.set_path(&filename)?;
+    if let Err(e) = header.set_path(&filename) {
+        return Err(anyhow::anyhow!(
+            "Failed to set path in tar header: e={}, filename={}",
+            e,
+            filename
+        ));
+    }
     header.set_size(file.size());
 
     if let Some(mode) = file.unix_mode() {
