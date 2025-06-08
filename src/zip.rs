@@ -9,6 +9,7 @@ use crate::rw::*;
 
 struct TarEntry {
     header: tar::Header,
+    path: String,
     data: Vec<u8>,
 }
 
@@ -17,17 +18,11 @@ where
     R: io::Read + io::Seek,
 {
     let mut file = zipar.by_index(idx)?;
-    let filename = file.name().to_owned();
+    let path = file.name().to_owned();
 
-    let mut header = tar::Header::new_ustar();
-    if let Err(e) = header.set_path(&filename) {
-        return Err(anyhow::anyhow!(
-            "Failed to set path in tar header: e={}, filename={}",
-            e,
-            filename
-        ));
-    }
+    let mut header = tar::Header::new_gnu();
     header.set_size(file.size());
+    header.set_cksum();
 
     if let Some(mode) = file.unix_mode() {
         header.set_mode(mode);
@@ -52,7 +47,7 @@ where
     let mut data = Vec::with_capacity(file.size() as usize);
     io::copy(&mut file, &mut data)?;
 
-    Ok(TarEntry { header, data })
+    Ok(TarEntry { header, path, data })
 }
 
 #[allow(unused)]
@@ -63,8 +58,8 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: R, dst: W) -> Result<()
     let mut pb = ProgressBar::new(zip.len() as u64);
 
     for i in 0..zip.len() {
-        let entry = zip_to_tarentry(&mut zip, i)?;
-        ar.append(&entry.header, entry.data.as_slice())?;
+        let mut entry = zip_to_tarentry(&mut zip, i)?;
+        ar.append_data(&mut entry.header, &entry.path, entry.data.as_slice())?;
         pb.inc();
     }
     pb.finish();
