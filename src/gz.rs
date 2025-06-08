@@ -1,7 +1,8 @@
+use super::Result;
 use crate::rw::*;
 use std::path::*;
 
-pub fn store_gz<P1, P2>(input_path: P1, dst_path: P2) -> std::io::Result<WriteMetadata>
+pub fn store_gz<P1, P2>(input_path: P1, dst_path: P2) -> Result<WriteMetadata>
 where
     P1: AsRef<Path>,
     P2: AsRef<Path>,
@@ -16,7 +17,7 @@ where
     Ok(out_file.meta())
 }
 
-pub fn store_plain<P1, P2>(input_path: P1, dst_path: P2) -> std::io::Result<WriteMetadata>
+pub fn store_plain<P1, P2>(input_path: P1, dst_path: P2) -> Result<WriteMetadata>
 where
     P1: AsRef<Path>,
     P2: AsRef<Path>,

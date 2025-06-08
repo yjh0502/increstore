@@ -1,6 +1,7 @@
 use std::io;
 use std::path::Path;
 
+use anyhow::Result;
 use log::*;
 use pbr::ProgressBar;
 
@@ -11,7 +12,7 @@ struct TarEntry {
     data: Vec<u8>,
 }
 
-fn zip_to_tarentry<R>(zipar: &mut zip::ZipArchive<R>, idx: usize) -> io::Result<TarEntry>
+fn zip_to_tarentry<R>(zipar: &mut zip::ZipArchive<R>, idx: usize) -> Result<TarEntry>
 where
     R: io::Read + io::Seek,
 {
@@ -49,7 +50,7 @@ where
 }
 
 #[allow(unused)]
-fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: R, dst: W) -> io::Result<()> {
+fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: R, dst: W) -> Result<()> {
     let mut zip = zip::ZipArchive::new(src)?;
     let mut ar = tar::Builder::new(dst);
 
@@ -65,11 +66,7 @@ fn zip_to_tar<R: io::Read + io::Seek, W: io::Write>(src: R, dst: W) -> io::Resul
     Ok(())
 }
 
-pub fn store_zip<P1, P2>(
-    input_path: P1,
-    dst_path: P2,
-    _parallel: bool,
-) -> std::io::Result<WriteMetadata>
+pub fn store_zip<P1, P2>(input_path: P1, dst_path: P2, _parallel: bool) -> Result<WriteMetadata>
 where
     P1: AsRef<Path>,
     P2: AsRef<Path>,

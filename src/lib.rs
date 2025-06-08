@@ -1,6 +1,6 @@
 use std::path::*;
 
-pub use failure::Error;
+use anyhow::anyhow;
 use log::*;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
@@ -21,7 +21,7 @@ use stats::Stats;
 use std::env;
 pub use validate::validate;
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = anyhow::Result<T>;
 
 #[derive(Debug, Clone, Copy)]
 pub enum FileType {
@@ -79,7 +79,7 @@ fn update_blob(conn: &mut db::Conn, tmp_path: NamedTempFile, blob: &Blob) -> Res
     store_object(tmp_path, &path)?;
 
     // TODO: update id
-    db::insert(conn, blob).map_err(Error::from)
+    db::insert(conn, blob).map_err(anyhow::Error::from)
 }
 
 pub fn get(conn: &mut db::Conn, filename: &str, out_filename: &str, dry_run: bool) -> Result<()> {
@@ -169,12 +169,9 @@ pub fn cleanup0(conn: &mut db::Conn) -> Result<()> {
         .map(|e| -> Result<String> {
             // relative path
             let path = e.path();
-            let relative_str = path.to_str().ok_or_else(|| {
-                Error::from(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "failed to convert path to str",
-                ))
-            })?;
+            let relative_str = path
+                .to_str()
+                .ok_or_else(|| anyhow!("failed to convert path to str: {:?}", path))?;
             Ok(relative_str.to_owned())
         })
         .collect::<Result<Vec<_>>>()?;
@@ -356,7 +353,7 @@ pub fn cleanup(conn: &mut db::Conn) -> Result<()> {
 
 fn store_blob<F>(input_filepath: &str, f: F) -> Result<Blob>
 where
-    F: FnOnce(&Path, &Path) -> std::io::Result<WriteMetadata>,
+    F: FnOnce(&Path, &Path) -> Result<WriteMetadata>,
 {
     let input_filename = Path::new(&input_filepath)
         .file_name()
